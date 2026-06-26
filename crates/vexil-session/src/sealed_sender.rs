@@ -223,7 +223,7 @@ pub fn seal_session_message<R: RngCore + CryptoRng>(
     inner.extend_from_slice(&(cert_bytes.len() as u16).to_be_bytes());
     inner.extend_from_slice(&cert_bytes);
     inner.extend_from_slice(&(enc_header.len() as u16).to_be_bytes());
-    inner.extend_from_slice(&enc_header);
+    inner.extend_from_slice(enc_header);
     inner.extend_from_slice(ct);
 
     // Outer hybrid key agreement.

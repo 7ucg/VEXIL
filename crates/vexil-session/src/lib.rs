@@ -519,9 +519,13 @@ impl Drop for Session {
         for e in &mut self.kem_hist {
             e.dk.zeroize();
         }
-        self.hks.take().map(|mut k| k.zeroize());
+        if let Some(mut k) = self.hks.take() {
+            k.zeroize()
+        }
         self.nhks.zeroize();
-        self.hkr.take().map(|mut k| k.zeroize());
+        if let Some(mut k) = self.hkr.take() {
+            k.zeroize()
+        }
         self.nhkr.zeroize();
     }
 }
