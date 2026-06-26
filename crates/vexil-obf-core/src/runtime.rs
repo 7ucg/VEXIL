@@ -45,7 +45,7 @@ pub enum OutputFormat {
 // ── byte encoding ─────────────────────────────────────────────────────────────
 
 fn is_charcode_safe(b: u8) -> bool {
-    b >= 0x21 && b <= 0x7e && b != 0x22 && b != 0x5c
+    (0x21..=0x7e).contains(&b) && b != 0x22 && b != 0x5c
 }
 
 /// Encode one byte as a JS expression in one of six forms.
