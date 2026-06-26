@@ -1,0 +1,48 @@
+[package]
+name = "vexil-fuzz"
+version = "0.0.0"
+publish = false
+edition = "2021"
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+libfuzzer-sys = "0.4"
+vexil-core = { path = "../crates/vexil-core", features = ["pq"] }
+vexil-session = { path = "../crates/vexil-session" }
+
+[[bin]]
+name = "envelope_parser"
+path = "fuzz_targets/envelope_parser.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "codec_roundtrip"
+path = "fuzz_targets/codec_roundtrip.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "identity_parser"
+path = "fuzz_targets/identity_parser.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "pq_parsers"
+path = "fuzz_targets/pq_parsers.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "session_parsers"
+path = "fuzz_targets/session_parsers.rs"
+test = false
+doc = false
+bench = false

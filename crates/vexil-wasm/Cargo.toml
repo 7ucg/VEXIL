@@ -1,0 +1,31 @@
+[package]
+name = "vexil-wasm"
+description = "VEXIL WebAssembly bridge — use the protocol from Node.js and browsers"
+version = "2.0.0"
+edition = "2021"
+license = "MIT"
+publish = false
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+vexil-core = { path = "../vexil-core", features = ["pq"] }
+vexil-session = { path = "../vexil-session" }
+wasm-bindgen = "0.2"
+
+# On wasm, the OS RNG comes from the JS crypto API. Two getrandom majors are in
+# the tree (0.2 via dalek, 0.4 via the ML-KEM/ML-DSA stack); enable each one's
+# wasm backend so randomness works in the browser/Node.
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+getrandom2 = { package = "getrandom", version = "0.2", features = ["js"] }
+getrandom4 = { package = "getrandom", version = "0.4", features = ["wasm_js"] }
+
+[profile.release]
+opt-level = "s"
+lto = true
+
+# wasm-opt (binaryen) is an optional size pass; skip it so the build doesn't need
+# to download the binaryen release. Enable in CI/release if you want it.
+[package.metadata.wasm-pack.profile.release]
+wasm-opt = false

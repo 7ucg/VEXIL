@@ -1,0 +1,53 @@
+# Rust build output
+/target
+**/target/
+debug/
+*.rs.bk
+*.pdb
+
+# Cargo: keep the workspace lock (binaries/FFI), drop the fuzz sub-crate lock
+/fuzz/Cargo.lock
+
+# Fuzzing artifacts (keep targets + corpus seeds in git if you add them)
+/fuzz/target/
+/fuzz/artifacts/
+/fuzz/corpus/
+
+# graphify knowledge-graph output (regenerated, not source)
+/graphify-out/
+
+# wasm-pack build output
+/crates/vexil-wasm/pkg/
+/crates/vexil-wasm/pkg-node/
+/crates/vexil-wasm/target/
+/crates/vexil-wasm/Cargo.lock
+/crates/vexil-obf-wasm/packages/
+/crates/vexil-obf-wasm/Cargo.lock
+
+# Working docs / scratch notes (PROTOCOL.md and README.md stay tracked at root)
+/docs/
+CLAUDE.md
+# Native FFI build artifacts that leak into the tree
+*.dll.exp
+*.dll.lib
+
+# Node.js
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.pnpm-debug.log*
+*.log
+coverage/
+.nyc_output/
+.env
+.env.local
+.env.*.local
+
+# Editors / OS
+/.idea/
+/.vscode/
+*.swp
+.DS_Store
+Thumbs.db
+desktop.ini

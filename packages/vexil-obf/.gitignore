@@ -1,0 +1,2 @@
+node_modules/
+# dist/ and wasm/ are force-tracked for npm-from-git installs

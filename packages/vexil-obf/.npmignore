@@ -1,0 +1,24 @@
+# Source (compiled to dist/ by tsc)
+src/
+
+# Tests and dev tooling
+bench.js
+tsconfig.json
+tsconfig*.json
+
+# Examples (only useful for the repo, not consumers)
+examples/
+
+# Dev dependencies and build artifacts
+node_modules/
+.gitignore
+
+# Logs
+*.log
+npm-debug.log*
+
+# Editor / OS
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/

@@ -1,0 +1,43 @@
+[workspace]
+resolver = "2"
+members = ["crates/vexil-core", "crates/vexil-cli", "crates/vexil-session", "crates/vexil-ffi", "crates/vexil-obf-core"]
+exclude = ["fuzz", "crates/vexil-wasm", "crates/vexil-obf-wasm"]
+
+[workspace.package]
+version = "2.0.0"
+edition = "2021"
+license = "MIT"
+repository = "https://github.com/baron/vexil"
+authors = ["Baron"]
+rust-version = "1.74"
+
+[workspace.dependencies]
+# crypto primitives — peer-reviewed crates only, no custom math
+argon2 = "0.5"
+chacha20poly1305 = "0.10"
+aes-gcm = "0.10"
+x25519-dalek = { version = "2.0", features = ["static_secrets"] }
+ed25519-dalek = { version = "2.1", features = ["rand_core"] }
+ml-kem = "0.2"
+kem = "=0.3.0-pre.0"
+ml-dsa = { version = "0.1", features = ["rand_core", "alloc"] }
+x-wing = { version = "0.1.0-rc.0", features = ["zeroize"] }
+hkdf = "0.12"
+sha2 = "0.10"
+blake2 = "0.10"
+# support
+rand_core = { version = "0.6", features = ["getrandom"] }
+zeroize = { version = "1.7", features = ["derive"] }
+thiserror = "1.0"
+subtle = "2.5"
+base64 = "0.22"
+hex = "0.4"
+proptest = "1.4"
+rand = { version = "0.8", default-features = false, features = ["std_rng", "getrandom"] }
+serde_json = "1.0"
+
+[profile.release]
+lto = true
+codegen-units = 1
+strip = true
+opt-level = 3

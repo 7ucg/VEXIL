@@ -1,0 +1,13 @@
+{
+  "name": "vexil-obf-wasm",
+  "description": "WASM bridge for vexil-obf obfuscator",
+  "version": "1.0.0",
+  "license": "MIT",
+  "files": [
+    "vexil_obf_wasm_bg.wasm",
+    "vexil_obf_wasm.js",
+    "vexil_obf_wasm.d.ts"
+  ],
+  "main": "vexil_obf_wasm.js",
+  "types": "vexil_obf_wasm.d.ts"
+}

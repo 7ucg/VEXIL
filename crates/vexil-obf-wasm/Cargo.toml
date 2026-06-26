@@ -1,0 +1,25 @@
+[package]
+name = "vexil-obf-wasm"
+version = "1.0.0"
+edition = "2021"
+license = "MIT"
+description = "WASM bridge for vexil-obf obfuscator"
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+vexil-obf-core = { path = "../vexil-obf-core" }
+wasm-bindgen = "0.2"
+serde-wasm-bindgen = "0.6"
+base64 = { version = "0.22", features = ["alloc"] }
+
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+getrandom2 = { package = "getrandom", version = "0.2", features = ["js"] }
+
+[profile.release]
+opt-level = "s"
+lto = true
+
+[package.metadata.wasm-pack.profile.release]
+wasm-opt = false

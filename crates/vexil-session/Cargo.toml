@@ -1,0 +1,28 @@
+[package]
+name = "vexil-session"
+description = "VEXIL session protocol — PQXDH handshake + Double Ratchet (forward secrecy + post-compromise security)"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+rust-version.workspace = true
+
+[lib]
+name = "vexil_session"
+path = "src/lib.rs"
+
+[dependencies]
+vexil-core = { path = "../vexil-core", features = ["pq"] }
+x25519-dalek = { workspace = true, features = ["static_secrets"] }
+ed25519-dalek = { workspace = true }
+hkdf.workspace = true
+hmac = "0.12"
+sha2.workspace = true
+rand_core.workspace = true
+zeroize.workspace = true
+thiserror.workspace = true
+
+[dev-dependencies]
+hex.workspace = true
+proptest.workspace = true

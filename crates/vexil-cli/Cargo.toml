@@ -1,0 +1,26 @@
+[package]
+name = "vexil-cli"
+description = "VEXIL command-line interface"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+rust-version.workspace = true
+
+[[bin]]
+name = "vexil"
+path = "src/main.rs"
+
+[dependencies]
+vexil-core = { path = "../vexil-core" }
+clap = { version = "4.4", features = ["derive", "env"] }
+clap_complete = "4.4"
+indicatif = "0.17"
+serde_json = "1.0"
+hex.workspace = true
+zeroize.workspace = true
+
+[features]
+default = []
+pq = ["vexil-core/pq"]

@@ -1,0 +1,104 @@
+// VEXIL protobuf contract.
+//
+// This describes a typed cross-language interface to the VEXIL operations (the
+// same ones the WASM and C-ABI bridges expose). Ciphertexts, keys, bundles and
+// session messages are opaque `bytes` — the canonical byte format is the TLV
+// wire format in PROTOCOL.md; this schema is for transport/RPC, not a second
+// wire format. Generate stubs with protoc / prost / protobuf.js / grpc.
+
+syntax = "proto3";
+
+package vexil.v2;
+
+// Algorithm suite (matches the on-wire suite byte).
+enum Suite {
+  SUITE_UNSPECIFIED = 0;
+  X_CHACHA_POLY_ARGON = 1;     // 0x01 X25519 + ChaCha20-Poly1305 + Argon2id
+  X_AES_GCM_ARGON = 2;         // 0x02 X25519 + AES-256-GCM + Argon2id
+  X_KYBER768_CHAPOLY = 3;      // 0x03 X25519 + ML-KEM-768 + ChaCha20-Poly1305 (PQ)
+  X_KYBER1024_CHAPOLY = 5;     // 0x05 X25519 + ML-KEM-1024 + ChaCha20-Poly1305 (PQ)
+}
+
+// Operation mode (matches the on-wire mode byte).
+enum Mode {
+  MODE_UNSPECIFIED = 0;
+  SYMMETRIC = 1;
+  SEALED = 2;
+  SIGNED = 3;
+  MULTI_RECIPIENT = 4;
+  STREAMING = 5;
+}
+
+// ---- At-rest operations -------------------------------------------------
+
+message EncryptPasswordRequest {
+  bytes password = 1;
+  bytes plaintext = 2;
+  Suite suite = 3;             // optional; default X_CHACHA_POLY_ARGON
+}
+message Ciphertext { string armored = 1; } // VEX1...- string (base89/hex/pem)
+
+message DecryptPasswordRequest {
+  bytes password = 1;
+  string armored = 2;
+}
+message Plaintext { bytes data = 1; }
+
+message KeygenRequest {
+  bool post_quantum = 1;      // true => PQ identity (X25519+ML-KEM+Ed25519+ML-DSA)
+  string passphrase = 2;      // optional; wraps the identity file
+}
+message KeygenResponse {
+  string identity_file = 1;   // VEXIL-IDENTITY-v* (secret)
+  string public_file = 2;     // VEXIL-KEY-v* (shareable)
+  string fingerprint = 3;     // a1b2-c3d4-e5f6-7890
+  bool post_quantum = 4;
+}
+
+message SealRequest {
+  repeated string recipient_public_files = 1; // one => sealed, many => multi
+  bytes plaintext = 2;
+  string sign_with_identity = 3;              // optional => signed
+}
+message OpenRequest {
+  string identity_file = 1;
+  string identity_passphrase = 2;             // optional
+  string armored = 3;
+  string expected_sender_public_file = 4;     // optional (signed mode)
+}
+
+message SignRequest {
+  string identity_file = 1;
+  bytes message = 2;
+}
+message Signature { string armored = 1; }     // VEXSIG-...
+message VerifyRequest {
+  string signer_public_file = 1;
+  bytes message = 2;
+  string signature = 3;
+}
+message VerifyResponse { bool valid = 1; }
+
+// ---- Live session (Double Ratchet) -------------------------------------
+// All blobs are opaque; serialize with the library's *_to_bytes helpers.
+
+message PreKeyBundle { bytes bundle = 1; }     // publishable
+message PreKeySecrets { bytes secrets = 1; }   // keep private
+message Handshake { bytes handshake = 1; }
+message SessionMessage { bytes message = 1; }  // header || ciphertext
+
+// ---- Groups (sender keys) ----------------------------------------------
+
+message SenderKeyDistribution { bytes distribution = 1; }
+message GroupMessage { bytes message = 1; }
+
+// A gRPC-style service a bridge can implement over WASM/FFI/native.
+service Vexil {
+  rpc EncryptPassword(EncryptPasswordRequest) returns (Ciphertext);
+  rpc DecryptPassword(DecryptPasswordRequest) returns (Plaintext);
+  rpc Keygen(KeygenRequest) returns (KeygenResponse);
+  rpc Seal(SealRequest) returns (Ciphertext);
+  rpc Open(OpenRequest) returns (Plaintext);
+  rpc Sign(SignRequest) returns (Signature);
+  rpc Verify(VerifyRequest) returns (VerifyResponse);
+}

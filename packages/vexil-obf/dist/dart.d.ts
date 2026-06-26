@@ -1,0 +1,1 @@
+export { obfuscateDart } from './index';

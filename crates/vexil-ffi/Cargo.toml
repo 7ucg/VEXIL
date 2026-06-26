@@ -1,0 +1,18 @@
+[package]
+name = "vexil-ffi"
+description = "C ABI for VEXIL — call the protocol from any language (Dart, Node, C, ...)"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+rust-version.workspace = true
+
+[lib]
+name = "vexil"
+# cdylib for FFI consumers; staticlib for embedding; rlib so Rust tests link.
+crate-type = ["cdylib", "staticlib", "rlib"]
+
+[dependencies]
+vexil-core = { path = "../vexil-core", features = ["pq"] }
+vexil-session = { path = "../vexil-session" }

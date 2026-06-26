@@ -1,0 +1,70 @@
+name: CI
+
+on:
+  push:
+    branches: [main, vexil-v1]
+  pull_request:
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  check:
+    name: fmt + clippy + test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+
+      - name: rustfmt
+        run: cargo fmt --all --check
+
+      - name: clippy
+        run: cargo clippy --all-targets --all-features -- -D warnings
+
+      - name: build
+        run: cargo build --release --all-targets --all-features
+
+      - name: test
+        run: cargo test --release --all-features
+
+      - name: benches compile
+        run: cargo bench --no-run --all-features
+
+  js:
+    name: vexil-obf (build + test)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - name: install
+        run: npm ci
+        working-directory: packages/vexil-obf
+      - name: build
+        run: npx tsc
+        working-directory: packages/vexil-obf
+      - name: test
+        run: node bench.js
+        working-directory: packages/vexil-obf
+
+  fuzz:
+    name: fuzz (parsers, 40s each)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@nightly
+      - uses: Swatinem/rust-cache@v2
+      - name: install cargo-fuzz
+        run: cargo install cargo-fuzz
+      - name: fuzz each parser
+        run: |
+          for t in envelope_parser codec_roundtrip identity_parser pq_parsers session_parsers; do
+            echo "::group::fuzz $t"
+            cargo fuzz run "$t" -- -max_total_time=40
+            echo "::endgroup::"
+          done

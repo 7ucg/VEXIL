@@ -1,0 +1,61 @@
+[package]
+name = "vexil-core"
+description = "VEXIL Protocol — versioned, algorithm-agile hybrid encryption over peer-reviewed primitives"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+rust-version.workspace = true
+
+[lib]
+name = "vexil_core"
+path = "src/lib.rs"
+
+[dependencies]
+argon2.workspace = true
+chacha20poly1305.workspace = true
+aes-gcm.workspace = true
+x25519-dalek.workspace = true
+ed25519-dalek.workspace = true
+hkdf.workspace = true
+sha2.workspace = true
+blake2.workspace = true
+rand_core.workspace = true
+zeroize.workspace = true
+thiserror.workspace = true
+subtle.workspace = true
+base64.workspace = true
+hex.workspace = true
+ml-kem = { workspace = true, optional = true }
+kem = { workspace = true, optional = true }
+ml-dsa = { workspace = true, optional = true }
+
+[features]
+default = []
+pq = ["dep:ml-kem", "dep:kem", "dep:ml-dsa"]
+
+[dev-dependencies]
+hex.workspace = true
+criterion = "0.5"
+proptest.workspace = true
+
+[[bench]]
+name = "symmetric"
+harness = false
+
+[[bench]]
+name = "asymmetric"
+harness = false
+
+[[bench]]
+name = "kdf"
+harness = false
+
+[[bench]]
+name = "codec"
+harness = false
+
+[[bench]]
+name = "streaming"
+harness = false
