@@ -512,7 +512,7 @@ fn cmd_decrypt(a: DecryptArgs) -> CliResult {
                 writer.flush()?;
                 return Ok(());
             }
-            5 | 6 | 7 => {
+            5..=7 => {
                 // PK streaming (VEX1SF-/VEX1AF-/VEX1MF-)
                 let idp = a
                     .identity
@@ -633,7 +633,7 @@ fn cmd_inspect(a: InspectArgs) -> CliResult {
     use vexil_core::envelope::{T_CIPHERTEXT, T_EXPIRY, T_RECIPIENT_FPR};
     let raw = read_ciphertext(&a.io)?;
 
-    if raw.len() >= 10 && &raw[0..5] == b"VEXIL" && matches!(raw[7], 4 | 5 | 6 | 7) {
+    if raw.len() >= 10 && &raw[0..5] == b"VEXIL" && matches!(raw[7], 4..=7) {
         let suite = vexil_core::Suite::from_byte(raw[6])?;
         let mode = vexil_core::envelope::Mode::from_byte(raw[7])?;
         println!("mode:       {} (raw binary)", mode.name());
