@@ -1,9 +1,13 @@
 # VEXIL
 
+> **Beta — not production-ready.** APIs may change without notice. No third-party audit has been completed. Test thoroughly before using in any system that handles real user data.
+
 Two things in one repo:
 
 - **Encryption library** — hybrid encryption with a versioned wire format. Password, public-key, signed, multi-recipient, streaming, and post-quantum, all with the same parser.
 - **JavaScript obfuscator** — compiles JS to an AES-256-GCM encrypted binary AST that runs inside an embedded WASM VM. Not just renaming and shuffling.
+
+![Tech stack](assets/stack.svg)
 
 ---
 
@@ -255,6 +259,12 @@ assert_eq!(pt, b"quantum-safe");
 ```
 
 Suite `0x04` (X-Wing KEM) is reserved but not implemented — dependency conflicts with the current `ml-kem` stack. ML-KEM-1024 covers the higher-security need without that risk.
+
+---
+
+## Roadmap
+
+![Roadmap](assets/roadmap.svg)
 
 ---
 

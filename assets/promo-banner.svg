@@ -1,0 +1,91 @@
+<svg width="1200" height="400" viewBox="0 0 1200 400" xmlns="http://www.w3.org/2000/svg" font-family="'Segoe UI', system-ui, sans-serif">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#050508"/>
+      <stop offset="60%" stop-color="#0a0a12"/>
+      <stop offset="100%" stop-color="#10082a"/>
+    </linearGradient>
+    <linearGradient id="grd" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0%" stop-color="#00c6ff"/>
+      <stop offset="100%" stop-color="#7c3aed"/>
+    </linearGradient>
+    <radialGradient id="glow1" cx="0.25" cy="0.5" r="0.5">
+      <stop offset="0%" stop-color="#00c6ff" stop-opacity="0.12"/>
+      <stop offset="100%" stop-color="#00c6ff" stop-opacity="0"/>
+    </radialGradient>
+    <radialGradient id="glow2" cx="0.75" cy="0.5" r="0.5">
+      <stop offset="0%" stop-color="#7c3aed" stop-opacity="0.1"/>
+      <stop offset="100%" stop-color="#7c3aed" stop-opacity="0"/>
+    </radialGradient>
+  </defs>
+
+  <!-- Background -->
+  <rect width="1200" height="400" fill="url(#bg)"/>
+  <rect width="1200" height="400" fill="url(#glow1)"/>
+  <rect width="1200" height="400" fill="url(#glow2)"/>
+
+  <!-- Top accent line -->
+  <rect x="0" y="0" width="1200" height="3" fill="url(#grd)"/>
+  <!-- Bottom accent line -->
+  <rect x="0" y="397" width="1200" height="3" fill="url(#grd)"/>
+
+  <!-- Grid lines (subtle) -->
+  <g stroke="#ffffff04" stroke-width="1">
+    <line x1="0" y1="100" x2="1200" y2="100"/>
+    <line x1="0" y1="200" x2="1200" y2="200"/>
+    <line x1="0" y1="300" x2="1200" y2="300"/>
+    <line x1="300" y1="0" x2="300" y2="400"/>
+    <line x1="600" y1="0" x2="600" y2="400"/>
+    <line x1="900" y1="0" x2="900" y2="400"/>
+  </g>
+
+  <!-- Logo / wordmark -->
+  <text x="80" y="185" fill="url(#grd)" font-size="96" font-weight="900" letter-spacing="-2" opacity="0.95">VEXIL</text>
+  <rect x="80" y="195" width="340" height="3" fill="url(#grd)" opacity="0.6" rx="2"/>
+  <text x="80" y="230" fill="#9ca3af" font-size="16" letter-spacing="4">ENCRYPTION TOOLKIT</text>
+
+  <!-- Beta badge -->
+  <rect x="80" y="256" width="60" height="24" fill="#ef4444" rx="4" opacity="0.9"/>
+  <text x="110" y="273" text-anchor="middle" fill="#fff" font-size="11" font-weight="700" letter-spacing="1">BETA</text>
+
+  <!-- Right side: features -->
+  <g transform="translate(620, 80)">
+    <!-- Feature blocks -->
+    <rect x="0" y="0" width="256" height="72" fill="#ffffff06" rx="8" stroke="#ffffff0a" stroke-width="1"/>
+    <text x="20" y="26" fill="#00c6ff" font-size="13" font-weight="700">Post-Quantum Ready</text>
+    <text x="20" y="46" fill="#6b7280" font-size="11.5">ML-KEM-768/1024 + ML-DSA-65</text>
+    <text x="20" y="63" fill="#6b7280" font-size="11.5">X25519 + Ed25519 hybrid mode</text>
+
+    <rect x="276" y="0" width="256" height="72" fill="#ffffff06" rx="8" stroke="#ffffff0a" stroke-width="1"/>
+    <text x="296" y="26" fill="#a78bfa" font-size="13" font-weight="700">JS Obfuscator</text>
+    <text x="296" y="46" fill="#6b7280" font-size="11.5">Binary AST + AES-256-GCM VM</text>
+    <text x="296" y="63" fill="#6b7280" font-size="11.5">Rollup · Vite · Webpack plugins</text>
+
+    <rect x="0" y="90" width="256" height="72" fill="#ffffff06" rx="8" stroke="#ffffff0a" stroke-width="1"/>
+    <text x="20" y="116" fill="#34d399" font-size="13" font-weight="700">Multi-Binding</text>
+    <text x="20" y="136" fill="#6b7280" font-size="11.5">Rust · C · Dart · Node · Browser</text>
+    <text x="20" y="153" fill="#6b7280" font-size="11.5">One core, every platform</text>
+
+    <rect x="276" y="90" width="256" height="72" fill="#ffffff06" rx="8" stroke="#ffffff0a" stroke-width="1"/>
+    <text x="296" y="116" fill="#fbbf24" font-size="13" font-weight="700">Signal Protocol</text>
+    <text x="296" y="136" fill="#6b7280" font-size="11.5">PQXDH + Double Ratchet</text>
+    <text x="296" y="153" fill="#6b7280" font-size="11.5">Forward secrecy + group keys</text>
+
+    <rect x="0" y="180" width="256" height="72" fill="#ffffff06" rx="8" stroke="#ffffff0a" stroke-width="1"/>
+    <text x="20" y="206" fill="#60a5fa" font-size="13" font-weight="700">Zero-Dependency Core</text>
+    <text x="20" y="226" fill="#6b7280" font-size="11.5">Reviewed crates only</text>
+    <text x="20" y="243" fill="#6b7280" font-size="11.5">No primitives written in-house</text>
+
+    <rect x="276" y="180" width="256" height="72" fill="#ffffff06" rx="8" stroke="#ffffff0a" stroke-width="1"/>
+    <text x="296" y="206" fill="#f472b6" font-size="13" font-weight="700">Open Source</text>
+    <text x="296" y="226" fill="#6b7280" font-size="11.5">MIT licensed · GitHub</text>
+    <text x="296" y="243" fill="#6b7280" font-size="11.5">github.com/7ucg/VEXIL</text>
+  </g>
+
+  <!-- Bottom tagline -->
+  <text x="80" y="320" fill="#4b5563" font-size="14" letter-spacing="1">Encrypt. Obfuscate. Ship.</text>
+  <text x="80" y="345" fill="#374151" font-size="12">Not yet production-ready — use for testing and evaluation only.</text>
+
+  <!-- Border -->
+  <rect x="0" y="0" width="1200" height="400" fill="none" stroke="#ffffff08" stroke-width="2" rx="0"/>
+</svg>
