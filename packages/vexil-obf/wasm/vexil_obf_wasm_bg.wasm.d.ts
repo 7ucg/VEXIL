@@ -3,7 +3,7 @@
 export const memory: WebAssembly.Memory;
 export const __wbg_obfoutput_free: (a: number, b: number) => void;
 export const obf_dart: (a: number, b: number) => [number, number, number, number];
-export const obf_process_js: (a: number, b: number, c: number, d: number, e: number) => [number, number, number];
+export const obf_process_js: (a: number, b: number, c: number, d: number, e: number, f: number) => [number, number, number];
 export const obfoutput_build_id_b64: (a: number) => [number, number];
 export const obfoutput_js: (a: number) => [number, number];
 export const obfoutput_key_b64: (a: number) => [number, number];

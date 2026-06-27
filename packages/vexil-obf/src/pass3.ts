@@ -619,7 +619,7 @@ export function pass3(code: string, opts: Pass3Options = {}, buildId?: string): 
   // Anti-LLM noise layer (AST-level, before generate)
   if (doAntiLLM) injectAntiLLM(ast, buildId);
 
-  let { code: out } = generate(ast, { compact: true, comments: false });
+  let { code: out } = generate(ast, { compact: true, comments: false, sourceMaps: false });
 
   // String-level injections (prepended/appended after generate)
   if (opts.selfDefend) out = injectSelfDefend(out);

@@ -12,4 +12,4 @@ export class ObfOutput {
 
 export function obf_dart(source: string): string;
 
-export function obf_process_js(babel_ast_json: string, env_fingerprint: boolean, format?: string | null): ObfOutput;
+export function obf_process_js(babel_ast_json: string, env_fingerprint: boolean, format: string | null | undefined, macro_ops: boolean): ObfOutput;

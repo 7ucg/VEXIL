@@ -95,15 +95,16 @@ exports.obf_dart = obf_dart;
 /**
  * @param {string} babel_ast_json
  * @param {boolean} env_fingerprint
- * @param {string | null} [format]
+ * @param {string | null | undefined} format
+ * @param {boolean} macro_ops
  * @returns {ObfOutput}
  */
-function obf_process_js(babel_ast_json, env_fingerprint, format) {
+function obf_process_js(babel_ast_json, env_fingerprint, format, macro_ops) {
     const ptr0 = passStringToWasm0(babel_ast_json, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
     const len0 = WASM_VECTOR_LEN;
     var ptr1 = isLikeNone(format) ? 0 : passStringToWasm0(format, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
     var len1 = WASM_VECTOR_LEN;
-    const ret = wasm.obf_process_js(ptr0, len0, env_fingerprint, ptr1, len1);
+    const ret = wasm.obf_process_js(ptr0, len0, env_fingerprint, ptr1, len1, macro_ops);
     if (ret[2]) {
         throw takeFromExternrefTable0(ret[1]);
     }

@@ -739,6 +739,38 @@ async function main() {
     pass('poisonIdentifiers: string literal validateLicense survives', code.includes('valid'));
   }
 
+  // 24. esbuild plugin: exports correctly as a function
+  {
+    const { vexilEsbuildPlugin } = require(`${DIST}/esbuild-plugin.js`);
+    pass('esbuild plugin: vexilEsbuildPlugin is a function', typeof vexilEsbuildPlugin === 'function');
+    const plugin = vexilEsbuildPlugin({ pass2: false });
+    pass('esbuild plugin: returns plugin object with name', plugin && plugin.name === 'vexil-obf');
+    pass('esbuild plugin: has setup function', typeof plugin.setup === 'function');
+  }
+
+  // 25. source map strip: obfuscateJs output has no sourceMappingURL or sourceURL
+  {
+    const { code } = await obfuscateJs('var x=1', { pass2: false });
+    pass('source map strip: no sourceMappingURL in output', !code.includes('sourceMappingURL'));
+    pass('source map strip: no sourceURL in output', !code.includes('sourceURL'));
+  }
+
+  // 26. macroOps: pass2 roundtrip still correct with macro-op aggregation enabled (default)
+  {
+    const macroSrc = 'function add(a, b) { return a + b; } module.exports = { result: add(3, 4) };';
+    const { code } = await obfuscateJs(macroSrc, { pass2: true, pass3: false });
+    const m = runAsModule(code);
+    pass('macroOps: pass2 roundtrip correct (default on)', m && m.result === 7);
+  }
+
+  // 27. macroOps: macroOps:false also produces a correct roundtrip (both paths functional)
+  {
+    const macroSrc2 = 'function mul(a, b) { return a * b; } module.exports = { r: mul(6, 7) };';
+    const { code } = await obfuscateJs(macroSrc2, { pass2: true, pass3: false, macroOps: false });
+    const m = runAsModule(code);
+    pass('macroOps: macroOps:false roundtrip correct', m && m.r === 42);
+  }
+
   // ═══════════════════════════════════════════════════════════════════════════
   // §10  BENCHMARK — timing across configurations
   // ═══════════════════════════════════════════════════════════════════════════

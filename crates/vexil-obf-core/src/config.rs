@@ -4,6 +4,8 @@ pub struct ObfConfig {
     pub env_fingerprint: bool,
     pub format: crate::runtime::OutputFormat,
     pub global_name: String,
+    /// If true (default), emit macro-op aggregation opcodes (220-225) for common 2-node patterns.
+    pub macro_ops: bool,
 }
 
 impl Default for ObfConfig {
@@ -13,6 +15,7 @@ impl Default for ObfConfig {
             env_fingerprint: false,
             format: crate::runtime::OutputFormat::Cjs,
             global_name: String::from("__vx__"),
+            macro_ops: true,
         }
     }
 }

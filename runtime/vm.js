@@ -222,6 +222,51 @@
       break;
     }
     var raw = r.u8();
+    // Feature 5: macro-op opcodes 220-225 are raw bytes (not permuted)
+    if (raw === 220) { // MACRO_CALL_MEMBER: obj_node + prop_len:u8 + prop_bytes + arg_count:u8 + args
+      skipNode(r, syms); // object
+      var _pl = r.u8(); r.pos += _pl; // property name
+      var _ac = r.u8();
+      for (var _i = 0; _i < _ac; _i++) skipNode(r, syms);
+      return;
+    }
+    if (raw === 221) { // MACRO_BINARY_LIT: op_byte + left_node + lit_type + lit_value
+      r.u8(); // op
+      skipNode(r, syms); // left
+      var _lt = r.u8();
+      if (_lt === 0) r.pos += 8; // f64
+      else if (_lt === 1) r.u16(); // str_idx
+      else r.u8(); // bool
+      return;
+    }
+    if (raw === 222) { // MACRO_RETURN_EXPR: expr_node
+      skipNode(r, syms);
+      return;
+    }
+    if (raw === 223) { // MACRO_ASSIGN_LIT: sym_idx:u16 + op_byte + lit_type + lit_value
+      r.u16(); // sym_idx
+      r.u8(); // op
+      var _lt = r.u8();
+      if (_lt === 0) r.pos += 8;
+      else if (_lt === 1) r.u16();
+      else r.u8();
+      return;
+    }
+    if (raw === 224) { // MACRO_IF_BINARY: op_byte + left + right + consequent + has_alt:u8 + alt?
+      r.u8(); // op
+      skipNode(r, syms); // left
+      skipNode(r, syms); // right
+      skipNode(r, syms); // consequent
+      var _ha = r.u8();
+      if (_ha) skipNode(r, syms);
+      return;
+    }
+    if (raw === 225) { // MACRO_VAR_INIT: scope_kind:u8 + sym_idx:u16 + init_node
+      r.u8(); // scope_kind
+      r.u16(); // sym_idx
+      skipNode(r, syms); // init
+      return;
+    }
     var type = _vINV[raw];
     switch (type) {
       case 0: case 1: { // PROGRAM, BLOCK
@@ -1015,6 +1060,74 @@
       if (raw === 211) { // STATE_XOR
         _vmAcc ^= r.u8();
         continue;
+      }
+      // Feature 5: macro-op opcodes 220-225 (raw bytes, not permuted)
+      if (raw === 220) { // MACRO_CALL_MEMBER: obj_node + prop_len:u8 + prop_bytes + arg_count:u8 + args
+        var _obj = evalNode(r, syms, strs, scope);
+        var _pl = r.u8();
+        var _prop = r.str(_pl);
+        var _ac = r.u8();
+        var _args = [];
+        for (var _i = 0; _i < _ac; _i++) _args.push(evalNode(r, syms, strs, scope));
+        return _obj[_prop].apply(_obj, _args);
+      }
+      if (raw === 221) { // MACRO_BINARY_LIT: op_byte + left_node + lit_type + lit_value
+        var _op = r.u8();
+        var _left = evalNode(r, syms, strs, scope);
+        var _lt = r.u8();
+        var _rval;
+        if (_lt === 0) _rval = r.f64();
+        else if (_lt === 1) _rval = strs[r.u16()];
+        else _rval = r.u8() !== 0;
+        // short-circuit ops
+        if (_op === 14) return _left && _rval; // &&
+        if (_op === 15) return _left || _rval; // ||
+        if (_op === 16) return (_left !== null && _left !== undefined) ? _left : _rval; // ??
+        return BIN_OPS[_op](_left, _rval);
+      }
+      if (raw === 222) { // MACRO_RETURN_EXPR: expr_node
+        return new Ret(evalNode(r, syms, strs, scope));
+      }
+      if (raw === 223) { // MACRO_ASSIGN_LIT: sym_idx:u16 + op_byte + lit_type + lit_value
+        var _sidx = r.u16();
+        var _name = syms[_sidx];
+        var _op = r.u8();
+        var _lt = r.u8();
+        var _rval;
+        if (_lt === 0) _rval = r.f64();
+        else if (_lt === 1) _rval = strs[r.u16()];
+        else _rval = r.u8() !== 0;
+        var _newVal = ASSIGN_OPS[_op](scope.get(_name), _rval);
+        scope.set(_name, _newVal);
+        return _newVal;
+      }
+      if (raw === 224) { // MACRO_IF_BINARY: op_byte + left + right + consequent + has_alt:u8 + alt?
+        var _op = r.u8();
+        var _left = evalNode(r, syms, strs, scope);
+        var _right = evalNode(r, syms, strs, scope);
+        var _cond;
+        if (_op === 14) _cond = _left && _right;
+        else if (_op === 15) _cond = _left || _right;
+        else if (_op === 16) _cond = (_left !== null && _left !== undefined) ? _left : _right;
+        else _cond = BIN_OPS[_op](_left, _right);
+        if (_cond) {
+          var _res = evalNode(r, syms, strs, scope); // consequent
+          var _ha = r.u8();
+          if (_ha) skipNode(r, syms);
+          return _res;
+        } else {
+          skipNode(r, syms); // consequent
+          var _ha = r.u8();
+          if (_ha) return evalNode(r, syms, strs, scope);
+          return undefined;
+        }
+      }
+      if (raw === 225) { // MACRO_VAR_INIT: scope_kind:u8 + sym_idx:u16 + init_node
+        r.u8(); // scope_kind (let/const/var — all def to current scope)
+        var _sidx = r.u16();
+        var _val = evalNode(r, syms, strs, scope);
+        scope.def(syms[_sidx], _val);
+        return undefined;
       }
       var _h = _dt[raw];
       if (!_h) throw new Error("[vobf] t:" + raw);

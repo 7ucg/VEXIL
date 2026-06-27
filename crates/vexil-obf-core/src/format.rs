@@ -171,6 +171,36 @@ const OP_STATE_SET: u8 = 210;
 /// STATE_XOR opcode: read 1 byte, _vmAcc ^= byte
 const OP_STATE_XOR: u8 = 211;
 
+// ---------------------------------------------------------------------------
+// Macro-op constants (Feature 5) — 220..=225
+// These are raw bytes, NOT permuted through push_type.
+// ---------------------------------------------------------------------------
+
+/// MACRO_CALL_MEMBER: CallExpression whose callee is a non-computed MemberExpression
+/// Format: [220][obj_node][prop_len: u8][prop_bytes...][arg_count: u8][arg_nodes...]
+const MACRO_CALL_MEMBER: u8 = 220;
+
+/// MACRO_BINARY_LIT: BinaryExpression where right operand is a literal
+/// Format: [221][op_byte][left_node][lit_type: u8][lit_value...]
+///   lit_type: 0=f64 (8 bytes), 1=string (u16 str_idx), 2=bool (1 byte)
+const MACRO_BINARY_LIT: u8 = 221;
+
+/// MACRO_RETURN_EXPR: ReturnStatement with a non-null argument
+/// Format: [222][expr_node]
+const MACRO_RETURN_EXPR: u8 = 222;
+
+/// MACRO_ASSIGN_LIT: AssignmentExpression where LHS is Identifier and RHS is literal
+/// Format: [223][sym_idx: u16][op_byte][lit_type: u8][lit_value...]
+const MACRO_ASSIGN_LIT: u8 = 223;
+
+/// MACRO_IF_BINARY: IfStatement whose test is a BinaryExpression
+/// Format: [224][op_byte][left_node][right_node][consequent_node][has_alt: u8][alt_node?]
+const MACRO_IF_BINARY: u8 = 224;
+
+/// MACRO_VAR_INIT: VariableDeclaration with exactly one declarator that has an init
+/// Format: [225][scope_kind: u8][sym_idx: u16][init_node]
+const MACRO_VAR_INIT: u8 = 225;
+
 /// Simple LCG for deterministic pseudo-random decisions during encoding.
 struct Lcg(u64);
 
@@ -202,10 +232,12 @@ struct EncCtx<'a> {
     vm_state: u8,
     /// how many real nodes since last STATE_XOR injection
     nodes_since_state: u32,
+    /// Feature 5: whether macro-op aggregation is enabled
+    macro_ops: bool,
 }
 
 impl<'a> EncCtx<'a> {
-    fn new(syms: &'a SymbolTable, seed: &[u8; 8]) -> Self {
+    fn new(syms: &'a SymbolTable, seed: &[u8; 8], macro_ops: bool) -> Self {
         let perm = build_perm(seed);
         let lcg = Lcg::new(seed);
         let vm_state = seed[2]; // initial state = 3rd seed byte
@@ -215,6 +247,7 @@ impl<'a> EncCtx<'a> {
             lcg,
             vm_state,
             nodes_since_state: 0,
+            macro_ops,
         }
     }
 
@@ -252,9 +285,14 @@ impl<'a> EncCtx<'a> {
 }
 
 /// Encode the Babel AST to binary.  Returns only the AST bytes (no header/tables).
-/// Includes Feature 2 (decoy opcodes) and Feature 3 (stateful opcodes).
-pub fn encode_ast(ast: &Value, syms: &SymbolTable, seed: &[u8; 8]) -> Result<Vec<u8>, ObfError> {
-    let mut ctx = EncCtx::new(syms, seed);
+/// Includes Feature 2 (decoy opcodes), Feature 3 (stateful opcodes), Feature 5 (macro ops).
+pub fn encode_ast(
+    ast: &Value,
+    syms: &SymbolTable,
+    seed: &[u8; 8],
+    macro_ops: bool,
+) -> Result<Vec<u8>, ObfError> {
+    let mut ctx = EncCtx::new(syms, seed, macro_ops);
     let mut out = Vec::new();
 
     // Feature 3: emit STATE_SET at the very start to initialize _vmAcc
@@ -343,6 +381,297 @@ fn wn(
     write_node(out, node, syms, perm, None)
 }
 
+// ---------------------------------------------------------------------------
+// Macro-op helpers (Feature 5)
+// ---------------------------------------------------------------------------
+
+/// Check if a node is a literal (NumericLiteral, StringLiteral, BooleanLiteral).
+fn is_literal(node: &Value) -> bool {
+    matches!(
+        node.get("type").and_then(|t| t.as_str()),
+        Some("NumericLiteral") | Some("StringLiteral") | Some("BooleanLiteral")
+    )
+}
+
+/// Emit literal payload: lit_type(u8) + value bytes.
+/// lit_type: 0=f64, 1=string (u16 str_idx), 2=bool (u8)
+fn push_literal_payload(
+    out: &mut Vec<u8>,
+    node: &Value,
+    syms: &SymbolTable,
+) -> Result<(), ObfError> {
+    match node.get("type").and_then(|t| t.as_str()) {
+        Some("NumericLiteral") => {
+            let val = node
+                .get("value")
+                .and_then(|v| v.as_f64())
+                .ok_or_else(|| ObfError::Encode("NumericLiteral missing value".into()))?;
+            out.push(0u8);
+            push_f64(out, val);
+        }
+        Some("StringLiteral") => {
+            let val = node
+                .get("value")
+                .and_then(|v| v.as_str())
+                .ok_or_else(|| ObfError::Encode("StringLiteral missing value".into()))?;
+            let str_idx = syms
+                .str_idx(val)
+                .ok_or_else(|| ObfError::Encode(format!("string not found: {}", val)))?;
+            out.push(1u8);
+            push_u16(out, str_idx);
+        }
+        Some("BooleanLiteral") => {
+            let val = node
+                .get("value")
+                .and_then(|v| v.as_bool())
+                .ok_or_else(|| ObfError::Encode("BooleanLiteral missing value".into()))?;
+            out.push(2u8);
+            out.push(if val { 1u8 } else { 0u8 });
+        }
+        _ => {
+            return Err(ObfError::Encode(
+                "push_literal_payload: not a literal".into(),
+            ))
+        }
+    }
+    Ok(())
+}
+
+/// Try to emit a macro opcode for `node`.  Returns true if a macro was emitted.
+/// Only called when ctx.macro_ops is true.
+fn try_write_macro(
+    out: &mut Vec<u8>,
+    node: &Value,
+    syms: &SymbolTable,
+    perm: &[u8; 37],
+) -> Result<bool, ObfError> {
+    let type_str = match node.get("type").and_then(|t| t.as_str()) {
+        Some(t) => t,
+        None => return Ok(false),
+    };
+
+    match type_str {
+        // ------------------------------------------------------------------
+        // MACRO_CALL_MEMBER (220): ExpressionStatement wrapping a CallExpression
+        // whose callee is a non-computed MemberExpression.
+        // Emits: [220][obj_node][prop_len:u8][prop_bytes][arg_count:u8][arg_nodes...]
+        // ------------------------------------------------------------------
+        "ExpressionStatement" => {
+            let expr = match node.get("expression") {
+                Some(e) => e,
+                None => return Ok(false),
+            };
+            if expr.get("type").and_then(|t| t.as_str()) != Some("CallExpression") {
+                return Ok(false);
+            }
+            let callee = match expr.get("callee") {
+                Some(c) => c,
+                None => return Ok(false),
+            };
+            if callee.get("type").and_then(|t| t.as_str()) != Some("MemberExpression") {
+                return Ok(false);
+            }
+            if get_bool(callee, "computed") {
+                return Ok(false);
+            }
+            let obj = match callee.get("object") {
+                Some(o) => o,
+                None => return Ok(false),
+            };
+            let prop = match callee.get("property") {
+                Some(p) => p,
+                None => return Ok(false),
+            };
+            let prop_name = match prop.get("name").and_then(|v| v.as_str()) {
+                Some(n) => n,
+                None => return Ok(false),
+            };
+            let prop_bytes = prop_name.as_bytes();
+            if prop_bytes.len() > 255 {
+                return Ok(false);
+            }
+            let args = get_array(expr, "arguments");
+            if args.len() > 255 {
+                return Ok(false);
+            }
+            out.push(MACRO_CALL_MEMBER);
+            wn(out, obj, syms, perm)?;
+            out.push(prop_bytes.len() as u8);
+            out.extend_from_slice(prop_bytes);
+            out.push(args.len() as u8);
+            for a in args {
+                wn(out, a, syms, perm)?;
+            }
+            return Ok(true);
+        }
+
+        // ------------------------------------------------------------------
+        // MACRO_BINARY_LIT (221): ExpressionStatement wrapping a BinaryExpression
+        // where right operand is a literal.
+        // Emits: [221][op_byte][left_node][lit_type:u8][lit_value...]
+        // ------------------------------------------------------------------
+        "BinaryExpression" | "LogicalExpression" => {
+            let right = match node.get("right") {
+                Some(r) => r,
+                None => return Ok(false),
+            };
+            if !is_literal(right) {
+                return Ok(false);
+            }
+            let op_str = get_str(node, "operator").unwrap_or_default();
+            let op_byte = bin_op_byte(&op_str);
+            let left = match node.get("left") {
+                Some(l) => l,
+                None => return Ok(false),
+            };
+            out.push(MACRO_BINARY_LIT);
+            out.push(op_byte);
+            wn(out, left, syms, perm)?;
+            push_literal_payload(out, right, syms)?;
+            return Ok(true);
+        }
+
+        // ------------------------------------------------------------------
+        // MACRO_RETURN_EXPR (222): ReturnStatement with a non-null argument.
+        // Emits: [222][expr_node]
+        // ------------------------------------------------------------------
+        "ReturnStatement" => {
+            let arg = match node.get("argument").filter(|v| !v.is_null()) {
+                Some(a) => a,
+                None => return Ok(false),
+            };
+            out.push(MACRO_RETURN_EXPR);
+            wn(out, arg, syms, perm)?;
+            return Ok(true);
+        }
+
+        // ------------------------------------------------------------------
+        // MACRO_ASSIGN_LIT (223): AssignmentExpression where LHS is Identifier
+        // and RHS is a literal.
+        // Emits: [223][sym_idx:u16][op_byte][lit_type:u8][lit_value...]
+        // ------------------------------------------------------------------
+        "AssignmentExpression" => {
+            let left = match node.get("left") {
+                Some(l) => l,
+                None => return Ok(false),
+            };
+            let right = match node.get("right") {
+                Some(r) => r,
+                None => return Ok(false),
+            };
+            if left.get("type").and_then(|t| t.as_str()) != Some("Identifier") {
+                return Ok(false);
+            }
+            if !is_literal(right) {
+                return Ok(false);
+            }
+            let name = match left.get("name").and_then(|v| v.as_str()) {
+                Some(n) => n,
+                None => return Ok(false),
+            };
+            let sym_idx = match syms.sym_idx(name) {
+                Some(i) => i,
+                None => return Ok(false),
+            };
+            let op_str = get_str(node, "operator").unwrap_or_default();
+            let op_byte = assign_op_byte(&op_str);
+            out.push(MACRO_ASSIGN_LIT);
+            push_u16(out, sym_idx);
+            out.push(op_byte);
+            push_literal_payload(out, right, syms)?;
+            return Ok(true);
+        }
+
+        // ------------------------------------------------------------------
+        // MACRO_IF_BINARY (224): IfStatement whose test is a BinaryExpression.
+        // Emits: [224][op_byte][left_node][right_node][consequent_node][has_alt:u8][alt?]
+        // ------------------------------------------------------------------
+        "IfStatement" => {
+            let test = match node.get("test") {
+                Some(t) => t,
+                None => return Ok(false),
+            };
+            if !matches!(
+                test.get("type").and_then(|t| t.as_str()),
+                Some("BinaryExpression") | Some("LogicalExpression")
+            ) {
+                return Ok(false);
+            }
+            let op_str = get_str(test, "operator").unwrap_or_default();
+            let op_byte = bin_op_byte(&op_str);
+            let left = match test.get("left") {
+                Some(l) => l,
+                None => return Ok(false),
+            };
+            let right = match test.get("right") {
+                Some(r) => r,
+                None => return Ok(false),
+            };
+            let cons = match node.get("consequent") {
+                Some(c) => c,
+                None => return Ok(false),
+            };
+            out.push(MACRO_IF_BINARY);
+            out.push(op_byte);
+            wn(out, left, syms, perm)?;
+            wn(out, right, syms, perm)?;
+            wn(out, cons, syms, perm)?;
+            let alt = node.get("alternate").filter(|v| !v.is_null());
+            if let Some(a) = alt {
+                out.push(1u8);
+                wn(out, a, syms, perm)?;
+            } else {
+                out.push(0u8);
+            }
+            return Ok(true);
+        }
+
+        // ------------------------------------------------------------------
+        // MACRO_VAR_INIT (225): VariableDeclaration with exactly one declarator
+        // that has a non-null initializer.
+        // Emits: [225][scope_kind:u8][sym_idx:u16][init_node]
+        // ------------------------------------------------------------------
+        "VariableDeclaration" => {
+            let decls = get_array(node, "declarations");
+            if decls.len() != 1 {
+                return Ok(false);
+            }
+            let decl = &decls[0];
+            let init = match decl.get("init").filter(|v| !v.is_null()) {
+                Some(i) => i,
+                None => return Ok(false),
+            };
+            let id = match decl.get("id") {
+                Some(i) => i,
+                None => return Ok(false),
+            };
+            let name = match id.get("name").and_then(|v| v.as_str()) {
+                Some(n) => n,
+                None => return Ok(false),
+            };
+            let sym_idx = match syms.sym_idx(name) {
+                Some(i) => i,
+                None => return Ok(false),
+            };
+            let scope_kind: u8 = match get_str(node, "kind").as_deref() {
+                Some("var") => 0,
+                Some("let") => 1,
+                Some("const") => 2,
+                _ => 0,
+            };
+            out.push(MACRO_VAR_INIT);
+            out.push(scope_kind);
+            push_u16(out, sym_idx);
+            wn(out, init, syms, perm)?;
+            return Ok(true);
+        }
+
+        _ => {}
+    }
+
+    Ok(false)
+}
+
 /// Write a body list (Program.body / Block.body), injecting noise between items.
 fn write_body(
     out: &mut Vec<u8>,
@@ -355,6 +684,9 @@ fn write_body(
         for stmt in stmts {
             ctx.maybe_emit_decoy(out);
             ctx.maybe_emit_state_xor(out);
+            if ctx.macro_ops && try_write_macro(out, stmt, syms, perm)? {
+                continue;
+            }
             wn(out, stmt, syms, perm)?;
         }
     } else {

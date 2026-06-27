@@ -263,7 +263,7 @@ export function pass1(source: string, opts: Pass1Options): Pass1Result {
     });
   }
 
-  const { code } = generate(ast, { compact: true, comments: false });
+  const { code } = generate(ast, { compact: true, comments: false, sourceMaps: false });
   const astJson = JSON.stringify(ast);
   return { code, astJson };
 }

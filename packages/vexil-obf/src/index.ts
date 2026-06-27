@@ -25,6 +25,8 @@ export interface ObfOptions {
   decoyOpcodes?: boolean;
   statefulOpcodes?: boolean;
   stackEncoding?: boolean;
+  // Feature 5: macro-op aggregation (default true when pass2 is active)
+  macroOps?: boolean;
 }
 
 export interface BatchResult {
@@ -84,6 +86,13 @@ function resolvePass3Opts(opts: ObfOptions): Pass3Options | false {
   return { ...defaults, ...shorthands, ...opt };
 }
 
+function stripSourceMaps(code: string): string {
+  code = code.replace(/\/\/# sourceMappingURL=\S+/g, '');
+  code = code.replace(/\/\*# sourceMappingURL=[\s\S]*?\*\//g, '');
+  code = code.replace(/\/\/# sourceURL=\S+/g, '');
+  return code;
+}
+
 export async function obfuscateJs(source: string, opts: ObfOptions = {}): Promise<ObfResult> {
   const p3opts = resolvePass3Opts(opts);
 
@@ -99,11 +108,11 @@ export async function obfuscateJs(source: string, opts: ObfOptions = {}): Promis
   if (opts.pass2 !== false) {
     const wasm = await loadWasm();
     if (wasm) {
-      const result = wasm.obf_process_js(astJson, opts.envFingerprint ?? false, opts.format ?? 'cjs');
+      const result = wasm.obf_process_js(astJson, opts.envFingerprint ?? false, opts.format ?? 'cjs', opts.macroOps !== false);
       const p2code: string = result.js;
-      const finalCode = p3opts !== false ? pass3(p2code, p3opts, result.build_id_b64) : p2code;
+      const rawCode = p3opts !== false ? pass3(p2code, p3opts, result.build_id_b64) : p2code;
       return {
-        code: finalCode,
+        code: stripSourceMaps(rawCode),
         key: result.key_b64,
         buildId: result.build_id_b64,
       };
@@ -111,8 +120,8 @@ export async function obfuscateJs(source: string, opts: ObfOptions = {}): Promis
   }
 
   // WASM not available: return pass1 result (optionally pass3'd)
-  const finalCode = p3opts !== false ? pass3(pass1Code, p3opts) : pass1Code;
-  return { code: finalCode };
+  const rawCode = p3opts !== false ? pass3(pass1Code, p3opts) : pass1Code;
+  return { code: stripSourceMaps(rawCode) };
 }
 
 export const PRESETS = {
@@ -127,6 +136,8 @@ export const PRESETS = {
     integrityTrap: true,
     callStackCheck: true,
     agentDisrupt: true,
+    antiLLM: true,
+    poisonStringArray: true,
   },
   max: {
     pass2: true,
@@ -139,6 +150,9 @@ export const PRESETS = {
     agentDisrupt: true,
     callStackCheck: true,
     antiLLM: true,
+    poisonIdentifiers: true,
+    poisonStringArray: true,
+    macroOps: true,
   },
 } satisfies Record<string, ObfOptions>;
 
@@ -190,6 +204,7 @@ export type { BundleObfOptions } from './bundle';
 export { vexilRollupPlugin } from './rollup-plugin';
 export { vexil as vexilVitePlugin } from './vite-plugin';
 export { VexilWebpackPlugin } from './webpack-plugin';
+export { vexilEsbuildPlugin } from './esbuild-plugin';
 
 // Re-obfuscate already-obfuscated JS (applies pass3 — identifier renaming, no string re-encryption).
 export async function reObfuscate(code: string, opts: Pass3Options = {}): Promise<string> {

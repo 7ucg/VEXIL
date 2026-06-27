@@ -37,7 +37,8 @@ pub fn process_pass2(babel_ast_json: &str, config: &ObfConfig) -> Result<Pass2Ou
 
     let syms = format::SymbolTable::collect(&ast);
     // Feature 2+3: decoy opcodes and stateful opcodes injected during AST encoding
-    let ast_bytes = format::encode_ast(&ast, &syms, &node_seed)?;
+    // Feature 5: macro-op aggregation (default enabled via config.macro_ops)
+    let ast_bytes = format::encode_ast(&ast, &syms, &node_seed, config.macro_ops)?;
 
     // Full payload: magic(4) + version(1) + build_id(16) + node_seed(8) +
     //   feature_header: jump_key(2) + scope_key(4) +

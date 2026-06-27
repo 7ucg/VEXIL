@@ -2,6 +2,8 @@
 
 JavaScript obfuscator with an encrypted WASM VM at its core. Code gets compiled to a custom binary AST, AES-256-GCM encrypted, and run inside an embedded interpreter. Not just renamed and shuffled like every other tool.
 
+Standard obfuscators are increasingly broken by LLM-assisted analysis pipelines (CASCADE, JSimplifier, webcrack). vexil-obf has specific countermeasures against each attack vector: string table poisoning, identifier flooding, fake numerical constants, stateful VM opcodes, and token budget drain structures that make automated analysis expensive without affecting runtime.
+
 ## How it compares
 
 | Feature | vexil-obf | javascript-obfuscator | obfuscator.io |
@@ -20,16 +22,35 @@ JavaScript obfuscator with an encrypted WASM VM at its core. Code gets compiled 
 | LCG constants as split string concatenations | ✓ | — | — |
 | String splitting: long strings become double _SD() lookups | ✓ | — | — |
 | Anti-hook (toString check before decryption) | ✓ | — | — |
+| Poison string array (fake API/crypto strings) | ✓ | — | — |
+| Identifier flooding (80 dead crypto-sounding names) | ✓ | — | — |
+| Fake numerical constants (\_TAU, \_KSZ, etc.) | ✓ | — | — |
+| Token budget drain (dead recursive structure) | ✓ | — | — |
 | String array with rotation | ✓ | ✓ | ✓ |
 | Computed property hex encoding | ✓ | ✓ | partial |
 | Integrity trap (tamper detection) | ✓ | — | — |
 | Anti-analysis (webdriver/phantom/debugger) | ✓ | partial | — |
 | Node.js + browser (UMD/IIFE/CJS) | ✓ | ✓ | — |
-| Vite / Rollup / webpack plugin | ✓ | — | — |
+| Vite / Rollup / webpack / esbuild plugin | ✓ | — | — |
 | Dart / Flutter obfuscation | ✓ | — | — |
 | Full ES6+ (classes, async, destructuring) | ✓ | ✓ | partial |
 
 Other tools work at the JS source level: rename identifiers, shuffle strings, flatten control flow. Someone with enough time and a deobfuscator can still read the logic. vexil-obf compiles the code to a binary format, encrypts it, and replaces the original with a VM that decrypts and executes at runtime. There is no source to recover without the per-build key.
+
+## Anti-LLM defenses
+
+Standard obfuscators are mostly broken by LLM-assisted analysis pipelines (CASCADE, JSimplifier, webcrack). vexil-obf has specific defenses against each attack vector:
+
+- **String array poisoning** — the string table contains ~25 fake API endpoints and function names that look real but are never called. Defeats string-recovery attacks that index semantic meaning from the string array.
+- **Identifier poisoning** — 80 dead variables with crypto/license-sounding names (validateLicense, checkExpiry, revokeSession) inject false semantic context throughout the output.
+- **Fake numerical constants** — truncated math and crypto constants (\_TAU=6.28, \_KSZ=256) misdirect constant-propagation analysis.
+- **Stateful VM** — opcodes maintain an accumulator; naive emulation that ignores state ops produces wrong behavior.
+- **Decoy bytecode** — random noise bytes between real instructions confuse disassemblers and tracers.
+- **Macro-ops** — common node pairs (member access + call, binary + literal) are fused into single dense opcodes, reducing recognizable dispatch patterns.
+- **Scope encoding** — variable names in the bytecode are XOR-encoded; memory inspection of the scope object shows no readable names.
+- **Runtime key binding** (`envKeyBind`) — the AES key is partially derived from a runtime environment fingerprint; sandbox execution with different env values silently fails decryption.
+- **Prototype freeze canary** — detected sandbox environments get `Object.freeze(Object.prototype)` applied, preventing further prototype hooking.
+- **Token budget drain** — a dead recursive structure forces expensive LLM processing without affecting runtime behavior.
 
 ## How the pipeline works
 
@@ -99,18 +120,64 @@ interface ObfOptions {
     renameIdentifiers?: boolean;    // default true
     encryptStrings?: boolean;       // default true
     flattenControlFlow?: boolean;   // default true
+    poisonIdentifiers?: boolean;    // inject dead license-sounding functions (default false)
   };
+  // Shorthand top-level flags — map into pass3 options
+  selfDefend?: boolean;           // timing trap when devtools open
+  debugProtection?: boolean;      // periodic debugger statement
+  integrityTrap?: boolean;        // XOR checksum payload guard (default true)
+  antiAnalysis?: boolean;         // detect webdriver/phantom/proxy
+  deadCode?: boolean;             // insert unreachable branches
+  callStackCheck?: boolean;       // call-stack depth guard (default true)
+  agentDisrupt?: boolean;         // zero VM key on automation detection (default true)
+  antiLLM?: boolean;              // identifier flood + ghost control flow + string dispersion
+  poisonStringArray?: boolean;    // inject fake API/crypto strings into string array
+  poisonIdentifiers?: boolean;    // 80 dead identifier declarations (false semantic context)
+  envKeyBind?: 'node' | 'browser' | false;  // bind one key byte to runtime env fingerprint
+  // VM bytecode hardening (accepted; always-on in Rust core when pass2 active)
+  jumpEncoding?: boolean;
+  decoyOpcodes?: boolean;
+  statefulOpcodes?: boolean;
+  stackEncoding?: boolean;
   pass3?: boolean | {
     hexNumbers?: boolean;       // default true
     computedProps?: boolean;    // default true
     stringArray?: boolean;      // default true
     integrityTrap?: boolean;    // default true
-    selfDefend?: boolean;       // timing trap when devtools open
-    debugProtection?: boolean;  // periodic debugger statement
-    antiAnalysis?: boolean;     // detect webdriver/phantom/proxy
+    selfDefend?: boolean;
+    debugProtection?: boolean;
+    antiAnalysis?: boolean;
+    callStackCheck?: boolean;
+    agentDisrupt?: boolean;
+    antiLLM?: boolean;
+    poisonStringArray?: boolean;
+    poisonIdentifiers?: boolean;
+    envKeyBind?: 'node' | 'browser' | false;
+    deadCode?: boolean;
   };
 }
 ```
+
+### Presets
+
+```js
+const { obfuscateJs, PRESETS } = require('vexil-obf');
+
+// fast: pass1 + pass3 only, no WASM VM (~18ms)
+await obfuscateJs(src, PRESETS.fast);
+
+// balanced: full pipeline + core defenses (~61ms)
+await obfuscateJs(src, PRESETS.balanced);
+
+// max: full pipeline + all anti-analysis and anti-LLM flags (~90ms)
+await obfuscateJs(src, PRESETS.max);
+```
+
+| Preset | pass2 | selfDefend | antiLLM | poisonStringArray | poisonIdentifiers |
+| --- | :---: | :---: | :---: | :---: | :---: |
+| `fast` | — | — | — | — | — |
+| `balanced` | ✓ | ✓ | ✓ | ✓ | — |
+| `max` | ✓ | ✓ | ✓ | ✓ | ✓ |
 
 ### Formats
 
@@ -189,6 +256,23 @@ module.exports = {
 ```
 
 Works with webpack 4 and 5. Output format is detected from `output.libraryTarget` (webpack 4) or `output.library.type` (webpack 5). Pass `format` in the options to override.
+
+### esbuild plugin
+
+```js
+// esbuild.config.js
+import { vexilEsbuildPlugin } from 'vexil-obf/esbuild-plugin';
+
+await esbuild.build({
+  entryPoints: ['src/index.js'],
+  bundle: true,
+  outfile: 'dist/bundle.js',
+  write: false,  // required: onEnd needs outputFiles in memory
+  plugins: [vexilEsbuildPlugin({ pass2: true })],
+});
+```
+
+Output format is detected from esbuild's `format` option (`cjs` → `cjs`, `esm` → `umd`, `iife` → `iife`). Requires `esbuild` as a peer dependency.
 
 ### CLI
 

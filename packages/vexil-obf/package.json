@@ -9,7 +9,8 @@
     "./rollup-plugin": "./dist/rollup-plugin.js",
     "./vite-plugin": "./dist/vite-plugin.js",
     "./webpack-plugin": "./dist/webpack-plugin.js",
-    "./bundle": "./dist/bundle.js"
+    "./bundle": "./dist/bundle.js",
+    "./esbuild-plugin": "./dist/esbuild-plugin.js"
   },
   "bin": {
     "vexil-obf": "dist/cli.js"
