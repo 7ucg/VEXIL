@@ -697,6 +697,48 @@ async function main() {
     pass('poisonIdentifiers: decryptPayload in output', code.includes('decryptPayload') || code.includes('if(false)'));
   }
 
+  // §9b-18 to §9b-23: new feature tests
+  const simpleSrc = 'var x = 1; console.log(x);';
+
+  // 18. poisonStringArray: 'validateLicense' appears in output string table
+  {
+    const { code } = await obfuscateJs(simpleSrc, { poisonStringArray: true, pass2: false });
+    pass('poisonStringArray: validateLicense in string array', code.includes('validateLicense'));
+  }
+
+  // 19. poisonStringArray: '/api/v2/auth' appears in output string table
+  {
+    const { code } = await obfuscateJs(simpleSrc, { poisonStringArray: true, pass2: false });
+    pass('poisonStringArray: /api/v2/auth in string array', code.includes('/api/v2/auth'));
+  }
+
+  // 20. antiLLM: fake math constants injected (_MCONST or truncated value 6.28)
+  {
+    const { code } = await obfuscateJs(simpleSrc, { antiLLM: true, pass2: false });
+    pass('antiLLM: fake constants present (_MCONST or 6.28)', code.includes('_MCONST') || code.includes('6.28'));
+  }
+
+  // 21. antiLLM: token drain function present (_noop)
+  {
+    const { code } = await obfuscateJs(simpleSrc, { antiLLM: true, pass2: false });
+    pass('antiLLM: token drain present (_noop)', code.includes('_noop'));
+  }
+
+  // 22. agentDisrupt: Object.freeze canary present in sandbox-detected branch
+  {
+    const { code } = await obfuscateJs(simpleSrc, { agentDisrupt: true, pass2: false });
+    pass('agentDisrupt: Object.freeze canary present', code.includes('freeze'));
+  }
+
+  // 23. poisonIdentifiers: string literal 'validateLicense' survives into output string array
+  //     applyStringSplit fragments it (threshold 8 chars); minimum first fragment is 'valid' (5 chars)
+  //     which is below the split threshold and always appears literally in _SA
+  {
+    const { code } = await obfuscateJs(simpleSrc, { poisonIdentifiers: true, pass2: false, pass1: { encryptStrings: false } });
+    // 'valid' (5 chars, <8) is never split further — always a literal fragment in _SA
+    pass('poisonIdentifiers: string literal validateLicense survives', code.includes('valid'));
+  }
+
   // ═══════════════════════════════════════════════════════════════════════════
   // §10  BENCHMARK — timing across configurations
   // ═══════════════════════════════════════════════════════════════════════════

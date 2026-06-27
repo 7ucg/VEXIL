@@ -18,6 +18,8 @@ export interface ObfOptions {
   agentDisrupt?: boolean;
   antiLLM?: boolean;
   poisonIdentifiers?: boolean;
+  poisonStringArray?: boolean;  // default false; auto-enabled when antiLLM: true
+  envKeyBind?: 'node' | 'browser' | false;
   // VM bytecode hardening flags (accepted; always-on in Rust core when pass2 is active)
   jumpEncoding?: boolean;
   decoyOpcodes?: boolean;
@@ -70,6 +72,13 @@ function resolvePass3Opts(opts: ObfOptions): Pass3Options | false {
   if (opts.callStackCheck !== undefined) shorthands.callStackCheck = opts.callStackCheck;
   if (opts.agentDisrupt !== undefined) shorthands.agentDisrupt = opts.agentDisrupt;
   if (opts.antiLLM !== undefined) shorthands.antiLLM = opts.antiLLM;
+  // poisonStringArray: explicit opt takes precedence; otherwise auto-enable when antiLLM: true
+  if (opts.poisonStringArray !== undefined) {
+    shorthands.poisonStringArray = opts.poisonStringArray;
+  } else if (opts.antiLLM === true) {
+    shorthands.poisonStringArray = true;
+  }
+  if (opts.envKeyBind !== undefined) shorthands.envKeyBind = opts.envKeyBind;
 
   if (opt === true || opt === undefined) return { ...defaults, ...shorthands };
   return { ...defaults, ...shorthands, ...opt };
