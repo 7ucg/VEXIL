@@ -56,6 +56,18 @@ const { code: custom } = await obfuscateJs(source, {
   envFingerprint: true,    // tie decryption to VOBF_ID env var
   envKeyBind: 'node',      // bind one key byte to runtime fingerprint ('node' | 'browser' | false)
 });
+
+// batch multiple files at once
+const { batchObfuscate, batchObfuscateDart } = require('vexil-obf');
+const results = await batchObfuscate([
+  { name: 'a.js', code: srcA },
+  { name: 'b.js', code: srcB },
+], PRESETS.max);
+
+// serialize / restore presets
+const { exportPreset, importPreset } = require('vexil-obf');
+const json = exportPreset(PRESETS.max);   // → '{"v":1,"pass2":true,...}'
+const opts = importPreset(json);
 ```
 
 **What makes it different from javascript-obfuscator / obfuscator.io:**

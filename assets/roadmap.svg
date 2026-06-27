@@ -112,8 +112,8 @@
   <text x="356" y="372" text-anchor="middle" fill="#60a5fa" font-size="12" font-weight="600">vexil-obf next</text>
   <line x1="268" y1="378" x2="444" y2="378" stroke="#60a5fa20" stroke-width="1"/>
   <text x="272" y="396" fill="#bfdbfe" font-size="11">◌ Dart WASM runtime</text>
-  <text x="272" y="414" fill="#bfdbfe" font-size="11">◌ Source map stripping</text>
-  <text x="272" y="430" fill="#bfdbfe" font-size="11">◌ esbuild plugin</text>
+  <text x="272" y="414" fill="#a7f3d0" font-size="11">✓ Source map stripping</text>
+  <text x="272" y="430" fill="#a7f3d0" font-size="11">✓ esbuild plugin</text>
 
   <!-- v1.0 stable card -->
   <rect x="472" y="348" width="428" height="100" fill="#0d0a1f" rx="8" stroke="#6b728040" stroke-width="1"/>

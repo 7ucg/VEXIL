@@ -179,6 +179,39 @@ await obfuscateJs(src, PRESETS.max);
 | `balanced` | ✓ | ✓ | ✓ | ✓ | — |
 | `max` | ✓ | ✓ | ✓ | ✓ | ✓ |
 
+### Batch
+
+```js
+const { batchObfuscate, batchObfuscateDart } = require('vexil-obf');
+
+// process multiple JS files in parallel
+const results = await batchObfuscate([
+  { name: 'a.js', code: srcA },
+  { name: 'b.js', code: srcB },
+], PRESETS.max);
+// results[i] = { name, code } on success, { name, error } on failure
+
+// same for Dart
+const dartResults = await batchObfuscateDart([
+  { name: 'a.dart', code: dartA },
+  { name: 'b.dart', code: dartB },
+]);
+```
+
+### Preset JSON
+
+```js
+const { exportPreset, importPreset } = require('vexil-obf');
+
+// serialize any options object to JSON (e.g. store in config file)
+const json = exportPreset(PRESETS.max);
+// → '{"v":1,"pass2":true,"selfDefend":true,...}'
+
+// restore from JSON
+const opts = importPreset(json);
+await obfuscateJs(src, opts);
+```
+
 ### Formats
 
 **CJS** — Node.js CommonJS (default):
