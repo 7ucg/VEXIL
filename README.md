@@ -27,10 +27,34 @@ const { code } = await obfuscateJs(source, PRESETS.max);
 
 // or configure manually
 const { code: custom } = await obfuscateJs(source, {
-  pass2: true,     // binary AST + AES-256-GCM VM
-  format: 'cjs',  // 'cjs' | 'umd' | 'iife'
-  antiLLM: true,
-  agentDisrupt: true,
+  // pipeline
+  pass2: true,              // binary AST + AES-256-GCM VM
+  format: 'cjs',           // 'cjs' | 'umd' | 'iife'
+
+  // VM self-defense
+  integrityTrap: true,     // XOR checksum — tamper → infinite loop (default true)
+  selfDefend: true,        // DevTools timing trap
+  debugProtection: true,   // periodic debugger statement
+  callStackCheck: true,    // call stack depth guard (default true)
+  agentDisrupt: true,      // zero key on Playwright / jsdom / Jest detection (default true)
+  antiAnalysis: true,      // webdriver / phantom / proxy detection
+
+  // anti-LLM
+  antiLLM: true,           // identifier flood + ghost control flow + string dispersion
+  poisonStringArray: true, // ~25 fake API/crypto strings injected into string array
+  poisonIdentifiers: true, // 15 dead license/crypto-sounding functions as false context
+
+  // bytecode hardening (always-on when pass2:true — flags accepted for explicitness)
+  jumpEncoding: true,      // jump offsets XOR'd per build
+  decoyOpcodes: true,      // noise bytes between real instructions
+  statefulOpcodes: true,   // accumulator opcodes — naive emulation gives wrong state
+  stackEncoding: true,     // scope variable names XOR-encoded in bytecode
+  macroOps: true,          // common 2-node patterns fused into single dense opcodes
+
+  // misc
+  deadCode: true,          // inject unreachable branches
+  envFingerprint: true,    // tie decryption to VOBF_ID env var
+  envKeyBind: 'node',      // bind one key byte to runtime fingerprint ('node' | 'browser' | false)
 });
 ```
 
