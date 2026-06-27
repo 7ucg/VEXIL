@@ -15,6 +15,11 @@ export interface ObfOptions {
     callStackCheck?: boolean;
     agentDisrupt?: boolean;
     antiLLM?: boolean;
+    poisonIdentifiers?: boolean;
+    jumpEncoding?: boolean;
+    decoyOpcodes?: boolean;
+    statefulOpcodes?: boolean;
+    stackEncoding?: boolean;
 }
 export interface BatchResult {
     path: string;

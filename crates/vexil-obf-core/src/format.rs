@@ -96,11 +96,17 @@ impl SymbolTable {
         }
     }
 
-    /// Encode the symbol and string tables to their wire format.
+    /// Encode the symbol and string tables to their wire format (no scope encoding).
     ///
     /// Symbol table: u16 n_syms, then for each: u8 len, bytes…
     /// String table: u16 n_strs, then for each: u16 len, bytes…
     pub fn encode(&self) -> Result<Vec<u8>, crate::ObfError> {
+        self.encode_with_scope_key(0)
+    }
+
+    /// Encode with scope_key_byte XOR applied to all symbol string bytes (Feature 4).
+    /// String table is NOT XOR-encoded (strings are not used as scope keys).
+    pub fn encode_with_scope_key(&self, scope_key_byte: u8) -> Result<Vec<u8>, crate::ObfError> {
         let mut out = Vec::new();
         push_u16(&mut out, self.symbols.len() as u16);
         for s in &self.symbols {
@@ -113,7 +119,10 @@ impl SymbolTable {
                 )));
             }
             out.push(b.len() as u8);
-            out.extend_from_slice(b);
+            // XOR each symbol byte with scope_key_byte (0 = no-op for legacy encode())
+            for &byte in b {
+                out.push(byte ^ scope_key_byte);
+            }
         }
         push_u16(&mut out, self.strings.len() as u16);
         for s in &self.strings {
@@ -148,12 +157,121 @@ pub fn build_perm(seed: &[u8; 8]) -> [u8; 37] {
 // Binary AST encoder
 // ---------------------------------------------------------------------------
 
+// ---------------------------------------------------------------------------
+// Decoy and stateful opcode constants (Features 2 & 3)
+// ---------------------------------------------------------------------------
+
+/// Decoy opcode range: 200..=207 (outside the 0..=36 shuffled node type range).
+/// Format: [decoy_byte: u8][payload_len: u8][payload: payload_len bytes]
+const DECOY_OPCODES: [u8; 8] = [200, 201, 202, 203, 204, 205, 206, 207];
+
+/// STATE_SET opcode: read 1 byte, set _vmAcc = byte
+const OP_STATE_SET: u8 = 210;
+
+/// STATE_XOR opcode: read 1 byte, _vmAcc ^= byte
+const OP_STATE_XOR: u8 = 211;
+
+/// Simple LCG for deterministic pseudo-random decisions during encoding.
+struct Lcg(u64);
+
+impl Lcg {
+    fn new(seed: &[u8; 8]) -> Self {
+        let s = u64::from_le_bytes(*seed);
+        // mix to avoid low-entropy starting points
+        let s = s
+            .wrapping_mul(0x9e3779b97f4a7c15)
+            .wrapping_add(0x6c62272e07bb0142);
+        Self(if s == 0 { 1 } else { s })
+    }
+
+    fn next(&mut self) -> u8 {
+        self.0 = self
+            .0
+            .wrapping_mul(6_364_136_223_846_793_005u64)
+            .wrapping_add(1_442_695_040_888_963_407u64);
+        (self.0 >> 56) as u8
+    }
+}
+
+/// Encoder context carrying the permutation and LCG state for decoy/stateful injection.
+struct EncCtx<'a> {
+    perm: [u8; 37],
+    syms: &'a SymbolTable,
+    lcg: Lcg,
+    /// vm_state accumulator for Feature 3
+    vm_state: u8,
+    /// how many real nodes since last STATE_XOR injection
+    nodes_since_state: u32,
+}
+
+impl<'a> EncCtx<'a> {
+    fn new(syms: &'a SymbolTable, seed: &[u8; 8]) -> Self {
+        let perm = build_perm(seed);
+        let lcg = Lcg::new(seed);
+        let vm_state = seed[2]; // initial state = 3rd seed byte
+        Self {
+            perm,
+            syms,
+            lcg,
+            vm_state,
+            nodes_since_state: 0,
+        }
+    }
+
+    /// Emit a decoy sequence (Feature 2) with 20% probability.
+    fn maybe_emit_decoy(&mut self, out: &mut Vec<u8>) {
+        // 20% chance: lcg next byte < 51  (51/256 ≈ 20%)
+        let roll = self.lcg.next();
+        if roll >= 51 {
+            return;
+        }
+        let opcode_idx = (self.lcg.next() as usize) % DECOY_OPCODES.len();
+        let decoy_byte = DECOY_OPCODES[opcode_idx];
+        let payload_len = 1 + (self.lcg.next() % 4); // 1..=4 bytes
+        out.push(decoy_byte);
+        out.push(payload_len);
+        for _ in 0..payload_len {
+            out.push(self.lcg.next());
+        }
+    }
+
+    /// Emit a STATE_XOR opcode (Feature 3) with roughly 1/20 node frequency.
+    fn maybe_emit_state_xor(&mut self, out: &mut Vec<u8>) {
+        self.nodes_since_state += 1;
+        // inject every 15-25 nodes (threshold derived from lcg)
+        let threshold = 15 + (self.lcg.next() % 11); // 15..=25
+        if self.nodes_since_state < threshold as u32 {
+            return;
+        }
+        self.nodes_since_state = 0;
+        let delta = self.lcg.next();
+        out.push(OP_STATE_XOR);
+        out.push(delta);
+        self.vm_state ^= delta;
+    }
+}
+
 /// Encode the Babel AST to binary.  Returns only the AST bytes (no header/tables).
+/// Includes Feature 2 (decoy opcodes) and Feature 3 (stateful opcodes).
 pub fn encode_ast(ast: &Value, syms: &SymbolTable, seed: &[u8; 8]) -> Result<Vec<u8>, ObfError> {
-    let perm = build_perm(seed);
+    let mut ctx = EncCtx::new(syms, seed);
     let mut out = Vec::new();
-    write_node(&mut out, ast, syms, &perm)?;
+
+    // Feature 3: emit STATE_SET at the very start to initialize _vmAcc
+    out.push(OP_STATE_SET);
+    out.push(ctx.vm_state);
+
+    write_node_ctx(&mut out, ast, &mut ctx)?;
     Ok(out)
+}
+
+/// Write a node with decoy/state opcode injection before it (Features 2 & 3).
+fn write_node_ctx(out: &mut Vec<u8>, node: &Value, ctx: &mut EncCtx) -> Result<(), ObfError> {
+    ctx.maybe_emit_decoy(out);
+    ctx.maybe_emit_state_xor(out);
+    // Must not pass `ctx` into write_node here — write_body handles body injection;
+    // at this top-level call we only want the noise already emitted above.
+    wn(out, node, ctx.syms, &ctx.perm)
 }
 
 // ---------------------------------------------------------------------------
@@ -214,11 +332,45 @@ fn write_unsupported(
     Ok(())
 }
 
+/// Convenience: write a sub-node without noise injection (recursive internal calls).
+#[inline(always)]
+fn wn(
+    out: &mut Vec<u8>,
+    node: &Value,
+    syms: &SymbolTable,
+    perm: &[u8; 37],
+) -> Result<(), ObfError> {
+    write_node(out, node, syms, perm, None)
+}
+
+/// Write a body list (Program.body / Block.body), injecting noise between items.
+fn write_body(
+    out: &mut Vec<u8>,
+    stmts: &[Value],
+    syms: &SymbolTable,
+    perm: &[u8; 37],
+    ctx: Option<&mut EncCtx>,
+) -> Result<(), ObfError> {
+    if let Some(ctx) = ctx {
+        for stmt in stmts {
+            ctx.maybe_emit_decoy(out);
+            ctx.maybe_emit_state_xor(out);
+            wn(out, stmt, syms, perm)?;
+        }
+    } else {
+        for stmt in stmts {
+            wn(out, stmt, syms, perm)?;
+        }
+    }
+    Ok(())
+}
+
 fn write_node(
     out: &mut Vec<u8>,
     node: &Value,
     syms: &SymbolTable,
     perm: &[u8; 37],
+    ctx: Option<&mut EncCtx>,
 ) -> Result<(), ObfError> {
     let type_str = match node.get("type").and_then(|v| v.as_str()) {
         Some(t) => t,
@@ -238,9 +390,7 @@ fn write_node(
             push_type(out, 0, perm);
             let body = get_array(node, "body");
             push_u16(out, body.len() as u16);
-            for stmt in body {
-                write_node(out, stmt, syms, perm)?;
-            }
+            write_body(out, body, syms, perm, ctx)?;
         }
 
         // ------------------------------------------------------------------
@@ -250,9 +400,7 @@ fn write_node(
             push_type(out, 1, perm);
             let body = get_array(node, "body");
             push_u16(out, body.len() as u16);
-            for stmt in body {
-                write_node(out, stmt, syms, perm)?;
-            }
+            write_body(out, body, syms, perm, ctx)?;
         }
 
         // ------------------------------------------------------------------
@@ -263,7 +411,7 @@ fn write_node(
             let expr = node
                 .get("expression")
                 .ok_or_else(|| ObfError::Encode("ExpressionStatement missing expression".into()))?;
-            write_node(out, expr, syms, perm)?;
+            wn(out, expr, syms, perm)?;
         }
 
         // ------------------------------------------------------------------
@@ -296,7 +444,7 @@ fn write_node(
                 let init = decl.get("init").filter(|v| !v.is_null());
                 if let Some(init_expr) = init {
                     out.push(1u8);
-                    write_node(out, init_expr, syms, perm)?;
+                    wn(out, init_expr, syms, perm)?;
                 } else {
                     out.push(0u8);
                 }
@@ -336,10 +484,10 @@ fn write_node(
             let expr_body = body.get("type").and_then(|t| t.as_str()) != Some("BlockStatement");
             if expr_body {
                 out.push(1u8);
-                write_node(out, body, syms, perm)?;
+                wn(out, body, syms, perm)?;
             } else {
                 out.push(0u8);
-                write_node(out, body, syms, perm)?;
+                wn(out, body, syms, perm)?;
             }
         }
 
@@ -351,7 +499,7 @@ fn write_node(
             let arg = node.get("argument").filter(|v| !v.is_null());
             if let Some(a) = arg {
                 out.push(1u8);
-                write_node(out, a, syms, perm)?;
+                wn(out, a, syms, perm)?;
             } else {
                 out.push(0u8);
             }
@@ -365,15 +513,15 @@ fn write_node(
             let test = node
                 .get("test")
                 .ok_or_else(|| ObfError::Encode("IfStatement missing test".into()))?;
-            write_node(out, test, syms, perm)?;
+            wn(out, test, syms, perm)?;
             let cons = node
                 .get("consequent")
                 .ok_or_else(|| ObfError::Encode("IfStatement missing consequent".into()))?;
-            write_node(out, cons, syms, perm)?;
+            wn(out, cons, syms, perm)?;
             let alt = node.get("alternate").filter(|v| !v.is_null());
             if let Some(a) = alt {
                 out.push(1u8);
-                write_node(out, a, syms, perm)?;
+                wn(out, a, syms, perm)?;
             } else {
                 out.push(0u8);
             }
@@ -387,11 +535,11 @@ fn write_node(
             let test = node
                 .get("test")
                 .ok_or_else(|| ObfError::Encode("WhileStatement missing test".into()))?;
-            write_node(out, test, syms, perm)?;
+            wn(out, test, syms, perm)?;
             let body = node
                 .get("body")
                 .ok_or_else(|| ObfError::Encode("WhileStatement missing body".into()))?;
-            write_node(out, body, syms, perm)?;
+            wn(out, body, syms, perm)?;
         }
 
         // ------------------------------------------------------------------
@@ -408,27 +556,27 @@ fn write_node(
                     } else {
                         out.push(2u8);
                     }
-                    write_node(out, n, syms, perm)?;
+                    wn(out, n, syms, perm)?;
                 }
             }
             let test = node.get("test").filter(|v| !v.is_null());
             if let Some(t) = test {
                 out.push(1u8);
-                write_node(out, t, syms, perm)?;
+                wn(out, t, syms, perm)?;
             } else {
                 out.push(0u8);
             }
             let update = node.get("update").filter(|v| !v.is_null());
             if let Some(u) = update {
                 out.push(1u8);
-                write_node(out, u, syms, perm)?;
+                wn(out, u, syms, perm)?;
             } else {
                 out.push(0u8);
             }
             let body = node
                 .get("body")
                 .ok_or_else(|| ObfError::Encode("ForStatement missing body".into()))?;
-            write_node(out, body, syms, perm)?;
+            wn(out, body, syms, perm)?;
         }
 
         // ------------------------------------------------------------------
@@ -439,15 +587,15 @@ fn write_node(
             let left = node
                 .get("left")
                 .ok_or_else(|| ObfError::Encode("ForOfStatement missing left".into()))?;
-            write_node(out, left, syms, perm)?;
+            wn(out, left, syms, perm)?;
             let right = node
                 .get("right")
                 .ok_or_else(|| ObfError::Encode("ForOfStatement missing right".into()))?;
-            write_node(out, right, syms, perm)?;
+            wn(out, right, syms, perm)?;
             let body = node
                 .get("body")
                 .ok_or_else(|| ObfError::Encode("ForOfStatement missing body".into()))?;
-            write_node(out, body, syms, perm)?;
+            wn(out, body, syms, perm)?;
         }
 
         // ------------------------------------------------------------------
@@ -458,15 +606,15 @@ fn write_node(
             let left = node
                 .get("left")
                 .ok_or_else(|| ObfError::Encode("ForInStatement missing left".into()))?;
-            write_node(out, left, syms, perm)?;
+            wn(out, left, syms, perm)?;
             let right = node
                 .get("right")
                 .ok_or_else(|| ObfError::Encode("ForInStatement missing right".into()))?;
-            write_node(out, right, syms, perm)?;
+            wn(out, right, syms, perm)?;
             let body = node
                 .get("body")
                 .ok_or_else(|| ObfError::Encode("ForInStatement missing body".into()))?;
-            write_node(out, body, syms, perm)?;
+            wn(out, body, syms, perm)?;
         }
 
         // ------------------------------------------------------------------
@@ -493,7 +641,7 @@ fn write_node(
             let arg = node
                 .get("argument")
                 .ok_or_else(|| ObfError::Encode("ThrowStatement missing argument".into()))?;
-            write_node(out, arg, syms, perm)?;
+            wn(out, arg, syms, perm)?;
         }
 
         // ------------------------------------------------------------------
@@ -504,7 +652,7 @@ fn write_node(
             let block = node
                 .get("block")
                 .ok_or_else(|| ObfError::Encode("TryStatement missing block".into()))?;
-            write_node(out, block, syms, perm)?;
+            wn(out, block, syms, perm)?;
 
             let handler = node.get("handler").filter(|v| !v.is_null());
             if let Some(h) = handler {
@@ -526,7 +674,7 @@ fn write_node(
                 let hbody = h
                     .get("body")
                     .ok_or_else(|| ObfError::Encode("catch handler missing body".into()))?;
-                write_node(out, hbody, syms, perm)?;
+                wn(out, hbody, syms, perm)?;
             } else {
                 out.push(0u8);
             }
@@ -534,7 +682,7 @@ fn write_node(
             let finalizer = node.get("finalizer").filter(|v| !v.is_null());
             if let Some(f) = finalizer {
                 out.push(1u8);
-                write_node(out, f, syms, perm)?;
+                wn(out, f, syms, perm)?;
             } else {
                 out.push(0u8);
             }
@@ -548,11 +696,11 @@ fn write_node(
             let callee = node
                 .get("callee")
                 .ok_or_else(|| ObfError::Encode("CallExpression missing callee".into()))?;
-            write_node(out, callee, syms, perm)?;
+            wn(out, callee, syms, perm)?;
             let args = get_array(node, "arguments");
             push_u16(out, args.len() as u16);
             for a in args {
-                write_node(out, a, syms, perm)?;
+                wn(out, a, syms, perm)?;
             }
         }
 
@@ -564,11 +712,11 @@ fn write_node(
             let callee = node
                 .get("callee")
                 .ok_or_else(|| ObfError::Encode("NewExpression missing callee".into()))?;
-            write_node(out, callee, syms, perm)?;
+            wn(out, callee, syms, perm)?;
             let args = get_array(node, "arguments");
             push_u16(out, args.len() as u16);
             for a in args {
-                write_node(out, a, syms, perm)?;
+                wn(out, a, syms, perm)?;
             }
         }
 
@@ -582,17 +730,17 @@ fn write_node(
                 let obj = node
                     .get("object")
                     .ok_or_else(|| ObfError::Encode("MemberExpression missing object".into()))?;
-                write_node(out, obj, syms, perm)?;
+                wn(out, obj, syms, perm)?;
                 let prop = node
                     .get("property")
                     .ok_or_else(|| ObfError::Encode("MemberExpression missing property".into()))?;
-                write_node(out, prop, syms, perm)?;
+                wn(out, prop, syms, perm)?;
             } else {
                 push_type(out, 19, perm);
                 let obj = node
                     .get("object")
                     .ok_or_else(|| ObfError::Encode("MemberExpression missing object".into()))?;
-                write_node(out, obj, syms, perm)?;
+                wn(out, obj, syms, perm)?;
                 let prop = node
                     .get("property")
                     .ok_or_else(|| ObfError::Encode("MemberExpression missing property".into()))?;
@@ -617,11 +765,11 @@ fn write_node(
             let left = node
                 .get("left")
                 .ok_or_else(|| ObfError::Encode("BinaryExpression missing left".into()))?;
-            write_node(out, left, syms, perm)?;
+            wn(out, left, syms, perm)?;
             let right = node
                 .get("right")
                 .ok_or_else(|| ObfError::Encode("BinaryExpression missing right".into()))?;
-            write_node(out, right, syms, perm)?;
+            wn(out, right, syms, perm)?;
         }
 
         // ------------------------------------------------------------------
@@ -635,7 +783,7 @@ fn write_node(
             let arg = node
                 .get("argument")
                 .ok_or_else(|| ObfError::Encode("UnaryExpression missing argument".into()))?;
-            write_node(out, arg, syms, perm)?;
+            wn(out, arg, syms, perm)?;
         }
 
         "UpdateExpression" => {
@@ -647,7 +795,7 @@ fn write_node(
             let arg = node
                 .get("argument")
                 .ok_or_else(|| ObfError::Encode("UpdateExpression missing argument".into()))?;
-            write_node(out, arg, syms, perm)?;
+            wn(out, arg, syms, perm)?;
         }
 
         // ------------------------------------------------------------------
@@ -661,11 +809,11 @@ fn write_node(
             let left = node
                 .get("left")
                 .ok_or_else(|| ObfError::Encode("AssignmentExpression missing left".into()))?;
-            write_node(out, left, syms, perm)?;
+            wn(out, left, syms, perm)?;
             let right = node
                 .get("right")
                 .ok_or_else(|| ObfError::Encode("AssignmentExpression missing right".into()))?;
-            write_node(out, right, syms, perm)?;
+            wn(out, right, syms, perm)?;
         }
 
         // ------------------------------------------------------------------
@@ -676,15 +824,15 @@ fn write_node(
             let test = node
                 .get("test")
                 .ok_or_else(|| ObfError::Encode("ConditionalExpression missing test".into()))?;
-            write_node(out, test, syms, perm)?;
+            wn(out, test, syms, perm)?;
             let cons = node.get("consequent").ok_or_else(|| {
                 ObfError::Encode("ConditionalExpression missing consequent".into())
             })?;
-            write_node(out, cons, syms, perm)?;
+            wn(out, cons, syms, perm)?;
             let alt = node.get("alternate").ok_or_else(|| {
                 ObfError::Encode("ConditionalExpression missing alternate".into())
             })?;
-            write_node(out, alt, syms, perm)?;
+            wn(out, alt, syms, perm)?;
         }
 
         // ------------------------------------------------------------------
@@ -695,7 +843,7 @@ fn write_node(
             let exprs = get_array(node, "expressions");
             push_u16(out, exprs.len() as u16);
             for e in exprs {
-                write_node(out, e, syms, perm)?;
+                wn(out, e, syms, perm)?;
             }
         }
 
@@ -707,7 +855,7 @@ fn write_node(
             let arg = node
                 .get("argument")
                 .ok_or_else(|| ObfError::Encode("SpreadElement missing argument".into()))?;
-            write_node(out, arg, syms, perm)?;
+            wn(out, arg, syms, perm)?;
         }
 
         // ------------------------------------------------------------------
@@ -784,7 +932,7 @@ fn write_node(
                     out.push(0u8); // hole
                 } else {
                     out.push(1u8);
-                    write_node(out, e, syms, perm)?;
+                    wn(out, e, syms, perm)?;
                 }
             }
         }
@@ -802,7 +950,7 @@ fn write_node(
                     // emit as key_type=1 str_idx=0 + spread arg  (best effort)
                     out.push(1u8);
                     push_u16(out, 0u16);
-                    write_node(out, prop, syms, perm)?;
+                    wn(out, prop, syms, perm)?;
                     continue;
                 }
                 let key = prop
@@ -847,7 +995,7 @@ fn write_node(
                 let value = prop
                     .get("value")
                     .ok_or_else(|| ObfError::Encode("ObjectProperty missing value".into()))?;
-                write_node(out, value, syms, perm)?;
+                wn(out, value, syms, perm)?;
             }
         }
 
@@ -878,7 +1026,7 @@ fn write_node(
             let exprs = get_array(node, "expressions");
             push_u16(out, exprs.len() as u16);
             for e in exprs {
-                write_node(out, e, syms, perm)?;
+                wn(out, e, syms, perm)?;
             }
         }
 
@@ -893,8 +1041,8 @@ fn write_node(
             let test = node
                 .get("test")
                 .ok_or_else(|| ObfError::Encode("DoWhileStatement missing test".into()))?;
-            write_node(out, body, syms, perm)?;
-            write_node(out, test, syms, perm)?;
+            wn(out, body, syms, perm)?;
+            wn(out, test, syms, perm)?;
         }
 
         // ------------------------------------------------------------------
@@ -913,13 +1061,13 @@ fn write_node(
             let tag = node
                 .get("tag")
                 .ok_or_else(|| ObfError::Encode("TaggedTemplateExpression missing tag".into()))?;
-            write_node(out, tag, syms, perm)?;
+            wn(out, tag, syms, perm)?;
             // arguments: the quasi template literal
             let quasi = node
                 .get("quasi")
                 .ok_or_else(|| ObfError::Encode("TaggedTemplateExpression missing quasi".into()))?;
             push_u16(out, 1u16);
-            write_node(out, quasi, syms, perm)?;
+            wn(out, quasi, syms, perm)?;
         }
 
         // ------------------------------------------------------------------
@@ -983,7 +1131,7 @@ fn write_func_common(
         .ok_or_else(|| ObfError::Encode("FunctionDecl/Expr missing body".into()))?;
     // body must be a BlockStatement — write it directly (the type byte is already handled
     // by write_node if we call it, but the spec says [block], so we recurse normally)
-    write_node(out, body, syms, perm)?;
+    wn(out, body, syms, perm)?;
     Ok(())
 }
 

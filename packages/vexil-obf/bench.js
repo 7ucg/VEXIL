@@ -376,7 +376,7 @@ async function main() {
     // Check past any common guard prefix (callStackCheck/agentDisrupt IIFEs are identical
     // across sources by design; the string array and payload sections differ).
     const { code: c3 } = await obfuscateJs(src01, { pass2: true });
-    pass('different sources → different structure', c1 !== c3 && c1.slice(600, 800) !== c3.slice(600, 800));
+    pass('different sources → different structure', c1 !== c3 && c1.slice(900, 1100) !== c3.slice(900, 1100));
   }
 
   // ═══════════════════════════════════════════════════════════════════════════
@@ -630,6 +630,71 @@ async function main() {
   {
     const { code } = await obfuscateJs(src01, { callStackCheck: true, pass2: false });
     pass('callStackCheck: stack check present', code.includes('stack') && code.includes('Error'));
+  }
+
+  // 11. jumpEncoding + stackEncoding: pass2 output still roundtrips correctly
+  {
+    const { code } = await obfuscateJs(src01, { pass2: true, jumpEncoding: true, stackEncoding: true });
+    let ok = true, err = '';
+    try {
+      const m = runAsModule(code);
+      if (m.hashPassword('abc') !== '616263') throw new Error('hashPassword wrong');
+    } catch (e) { ok = false; err = e.message; }
+    pass('jumpEncoding+stackEncoding: correctness', ok, err || undefined);
+  }
+
+  // 12. decoyOpcodes: pass2 output is larger than pass1-only output
+  {
+    const { code: withDecoys } = await obfuscateJs(src01, { pass2: true, pass3: false, decoyOpcodes: true });
+    const { code: noPass2 }    = await obfuscateJs(src01, { pass2: false, pass3: false });
+    pass('decoyOpcodes: pass2 output larger than pass1-only', withDecoys.length > noPass2.length);
+  }
+
+  // 13. statefulOpcodes: pass2 output still executes correctly
+  {
+    const { code } = await obfuscateJs(src04, { pass2: true, statefulOpcodes: true });
+    let ok = true, err = '';
+    try {
+      const m = runAsModule(code);
+      if (typeof m.ApiClient !== 'function') throw new Error('ApiClient not exported');
+      const sig = new m.ApiClient('https://x.com', 'k').sign({ id: 1 });
+      if (typeof sig !== 'string' || sig.length !== 64) throw new Error('sign() wrong: ' + sig);
+    } catch (e) { ok = false; err = e.message; }
+    pass('statefulOpcodes: correctness', ok, err || undefined);
+  }
+
+  // 14. all 4 VM hardening flags together: correctness survives combined features
+  {
+    const { code } = await obfuscateJs(src01, {
+      pass2: true,
+      jumpEncoding: true, decoyOpcodes: true, statefulOpcodes: true, stackEncoding: true,
+    });
+    let ok = true, err = '';
+    try {
+      const m = runAsModule(code);
+      if (m.hashPassword('abc') !== '616263') throw new Error('hashPassword wrong');
+      if (!m.getConnectionString().includes('db.internal')) throw new Error('getConnectionString wrong');
+    } catch (e) { ok = false; err = e.message; }
+    pass('all VM hardening flags: correctness', ok, err || undefined);
+  }
+
+  // 15. agentDisrupt: jsdom detection (HTMLElement check) injected
+  {
+    const { code } = await obfuscateJs(src01, { agentDisrupt: true, pass2: false });
+    pass('agentDisrupt: jsdom check (HTMLElement) present', code.includes('HTMLElement'));
+  }
+
+  // 16. agentDisrupt: Proxy/hook detection (native code check) injected
+  {
+    const { code } = await obfuscateJs(src01, { agentDisrupt: true, pass2: false });
+    pass('agentDisrupt: Proxy hook check (native code) present', code.includes('native code'));
+  }
+
+  // 17. poisonIdentifiers: dead if(false) block with license-sounding fn names injected
+  {
+    const { code } = await obfuscateJs(src01, { poisonIdentifiers: true, pass2: false });
+    pass('poisonIdentifiers: validateLicense in output', code.includes('validateLicense') || code.includes('if(false)'));
+    pass('poisonIdentifiers: decryptPayload in output', code.includes('decryptPayload') || code.includes('if(false)'));
   }
 
   // ═══════════════════════════════════════════════════════════════════════════

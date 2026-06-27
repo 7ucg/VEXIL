@@ -296,7 +296,9 @@ function buildCallStackGuardCode(opts) {
                 `if((typeof navigator!=='undefined'&&navigator.webdriver)||` +
                 `(typeof window!=='undefined'&&(window.__playwright||window.__selenium_unwrapped))||` +
                 `(typeof global!=='undefined'&&global.__coverage__!==undefined)||` +
-                `(typeof process!=='undefined'&&process.env&&(process.env.JEST_WORKER_ID||process.env.VITEST_WORKER_ID))){` +
+                `(typeof process!=='undefined'&&process.env&&(process.env.JEST_WORKER_ID||process.env.VITEST_WORKER_ID))||` +
+                `(typeof window!=='undefined'&&typeof window.HTMLElement!=='undefined'&&!window.chrome&&window.name==='')||` +
+                `(Object.keys.toString().indexOf('native code')===-1||Function.prototype.apply.toString().indexOf('native code')===-1)){` +
                 `if(typeof _vK!=='undefined'){for(var _zi=0;_zi<32;_zi++)_vK[_zi]=0;}` +
                 `}}catch(_ae){}})();`;
     }

@@ -2,6 +2,7 @@ export interface Pass1Options {
     renameIdentifiers: boolean;
     encryptStrings: boolean;
     flattenControlFlow: boolean;
+    poisonIdentifiers: boolean;
 }
 export interface Pass1Result {
     code: string;

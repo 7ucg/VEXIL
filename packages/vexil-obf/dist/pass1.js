@@ -123,6 +123,28 @@ function pass1(source, opts) {
         sourceType: 'module',
         plugins: ['typescript', 'classProperties', 'optionalChaining', 'nullishCoalescingOperator']
     });
+    if (opts.poisonIdentifiers) {
+        const poisonSrc = `if(false){` +
+            `function validateLicense(token,sig){return sig.verify(token);}` +
+            `function checkExpiry(date){return Date.now()>date;}` +
+            `function activateFeature(id){featureFlags[id]=true;}` +
+            `function decryptPayload(key,ct){return aes.decrypt(key,ct);}` +
+            `function verifySignature(pub,msg,sig){return ed25519.verify(pub,msg,sig);}` +
+            `function revokeSession(uid){sessions.delete(uid);}` +
+            `function fetchLicenseServer(endpoint){return fetch(endpoint+'/v2/license');}` +
+            `function hashPassword(pw,salt){return argon2.hash(pw,salt);}` +
+            `function rotateKey(current){return deriveKey(current,entropy());}` +
+            `function checkRateLimit(ip){return rateLimiter.check(ip);}` +
+            `function authorizeRequest(token,scope){return jwt.verify(token,scope);}` +
+            `function encryptResponse(data,key){return aes.encrypt(data,key);}` +
+            `function pruneExpiredTokens(){tokenStore.prune(Date.now());}` +
+            `function validateApiKey(key){return apiKeys.has(key);}` +
+            `function buildAuthHeader(token){return 'Bearer '+token;}` +
+            `}`;
+        const poisonAst = parser.parse(poisonSrc, { sourceType: 'script' });
+        const poisonStmt = poisonAst.program.body[0];
+        ast.program.body.unshift(poisonStmt);
+    }
     const nextName = nameGen();
     const renameMap = new Map(); // original -> obf name
     if (opts.renameIdentifiers) {

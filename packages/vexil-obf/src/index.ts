@@ -17,6 +17,12 @@ export interface ObfOptions {
   callStackCheck?: boolean;
   agentDisrupt?: boolean;
   antiLLM?: boolean;
+  poisonIdentifiers?: boolean;
+  // VM bytecode hardening flags (accepted; always-on in Rust core when pass2 is active)
+  jumpEncoding?: boolean;
+  decoyOpcodes?: boolean;
+  statefulOpcodes?: boolean;
+  stackEncoding?: boolean;
 }
 
 export interface BatchResult {
@@ -76,6 +82,7 @@ export async function obfuscateJs(source: string, opts: ObfOptions = {}): Promis
     renameIdentifiers: opts.pass1?.renameIdentifiers ?? true,
     encryptStrings: opts.pass1?.encryptStrings ?? true,
     flattenControlFlow: opts.pass1?.flattenControlFlow ?? true,
+    poisonIdentifiers: opts.pass1?.poisonIdentifiers ?? opts.poisonIdentifiers ?? false,
   };
 
   const { code: pass1Code, astJson } = pass1(source, p1opts);

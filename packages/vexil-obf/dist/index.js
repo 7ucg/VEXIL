@@ -61,6 +61,7 @@ async function obfuscateJs(source, opts = {}) {
         renameIdentifiers: opts.pass1?.renameIdentifiers ?? true,
         encryptStrings: opts.pass1?.encryptStrings ?? true,
         flattenControlFlow: opts.pass1?.flattenControlFlow ?? true,
+        poisonIdentifiers: opts.pass1?.poisonIdentifiers ?? opts.poisonIdentifiers ?? false,
     };
     const { code: pass1Code, astJson } = (0, pass1_1.pass1)(source, p1opts);
     if (opts.pass2 !== false) {

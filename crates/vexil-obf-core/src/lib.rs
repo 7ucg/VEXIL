@@ -28,16 +28,30 @@ pub fn process_pass2(babel_ast_json: &str, config: &ObfConfig) -> Result<Pass2Ou
     let node_seed = encrypt::generate_seed();
     let key = encrypt::generate_key();
 
+    // Feature 1: derive jump_key from seed (stored in header, read by vm.js after decrypt)
+    let jump_key: u16 = (node_seed[0] as u16) ^ ((node_seed[1] as u16) << 8) ^ 0x5A5A;
+    // Feature 4: scope_key from seed bytes 4..8; XOR all symbol strings with low byte
+    let scope_key: u32 =
+        u32::from_le_bytes([node_seed[4], node_seed[5], node_seed[6], node_seed[7]]);
+    let scope_key_byte = (scope_key & 0xFF) as u8;
+
     let syms = format::SymbolTable::collect(&ast);
+    // Feature 2+3: decoy opcodes and stateful opcodes injected during AST encoding
     let ast_bytes = format::encode_ast(&ast, &syms, &node_seed)?;
 
-    // Full payload: magic + version + build_id + node_seed + symbol/string tables + ast bytes
+    // Full payload: magic(4) + version(1) + build_id(16) + node_seed(8) +
+    //   feature_header: jump_key(2) + scope_key(4) +
+    //   symbol/string tables (symbols XOR'd with scope_key_byte) + ast bytes
     let mut payload = Vec::new();
     payload.extend_from_slice(b"VOBF");
     payload.push(1u8);
     payload.extend_from_slice(&build_id);
     payload.extend_from_slice(&node_seed);
-    payload.extend_from_slice(&syms.encode()?);
+    // Feature header (read by vm.js after AES-GCM decrypt, before symbol table)
+    payload.extend_from_slice(&jump_key.to_le_bytes());
+    payload.extend_from_slice(&scope_key.to_le_bytes());
+    // Symbol/string tables: symbols XOR-encoded with scope_key_byte
+    payload.extend_from_slice(&syms.encode_with_scope_key(scope_key_byte)?);
     payload.extend_from_slice(&ast_bytes);
 
     let encrypted = encrypt::encrypt(&key, &payload)?;

@@ -85,15 +85,26 @@
     r.bytes(16); // build_id
     r.bytes(8);  // node_seed (already available as _vS)
 
-    // symbol table
+    // Feature 1: jump_key (2 bytes LE) — reserved, stored for future use
+    var _jumpKey = r.u16(); // eslint-disable-line no-unused-vars
+
+    // Feature 4: scope_key (4 bytes LE) — low byte used to XOR-decode symbol strings
+    var _scopeKey = r.u16(); r.u16(); // consume all 4 bytes (two u16 reads)
+    var _scopeKeyByte = _scopeKey & 0xFF;
+
+    // symbol table — each symbol's bytes are XOR'd with _scopeKeyByte (Feature 4)
     var nSym = r.u16();
     var syms = [];
     for (var i = 0; i < nSym; i++) {
       var len = r.u8();
-      syms.push(r.str(len));
+      var bytes = r.bytes(len);
+      // decode: XOR each byte back
+      var chars = [];
+      for (var j = 0; j < len; j++) chars.push(bytes[j] ^ _scopeKeyByte);
+      syms.push(String.fromCharCode.apply(null, chars));
     }
 
-    // string table
+    // string table (not XOR-encoded)
     var nStr = r.u16();
     var strs = [];
     for (var i = 0; i < nStr; i++) {
@@ -199,6 +210,17 @@
   // ── skipNode: advance reader past a node without evaluating ───────────────
   // Must mirror evalNode's read pattern exactly for every node type.
   function skipNode(r, syms) {
+    // Feature 2 & 3: consume decoy/stateful opcodes before the real node byte
+    for (;;) {
+      var _peek = r.buf[r.pos];
+      if (_peek >= 200 && _peek <= 207) { // decoy
+        r.pos++; var _dl = r.u8(); r.pos += _dl; continue;
+      }
+      if (_peek === 210 || _peek === 211) { // STATE_SET / STATE_XOR
+        r.pos += 2; continue;
+      }
+      break;
+    }
     var raw = r.u8();
     var type = _vINV[raw];
     switch (type) {
@@ -357,9 +379,21 @@
     }
   }
 
+  // ── _skipNoise: advance past decoy/stateful opcodes before peeking ───────
+  // Features 2 & 3: must call this before inspecting r.buf[r.pos] as a node type.
+  function _skipNoise(r) {
+    for (;;) {
+      var _b = r.buf[r.pos];
+      if (_b >= 200 && _b <= 207) { r.pos++; r.pos += r.u8(); continue; }
+      if (_b === 210 || _b === 211) { r.pos += 2; continue; }
+      break;
+    }
+  }
+
   // ── resolveAssignTarget ───────────────────────────────────────────────────
   // Read the LHS node and return { get(), set(v) } for assignment.
   function resolveAssignTarget(r, syms, strs, scope) {
+    _skipNoise(r);
     var peekType = _vINV[r.buf[r.pos]];
     if (peekType === 27) { // IDENT
       r.u8(); // type byte
@@ -397,6 +431,7 @@
   // ── resolveCalleeAndThis ──────────────────────────────────────────────────
   // Read callee node and return { fn, thisArg } preserving method receiver.
   function resolveCalleeAndThis(r, syms, strs, scope) {
+    _skipNoise(r);
     var peekType = _vINV[r.buf[r.pos]];
     if (peekType === 19) { // MEMBER_EXPR obj.method(...)
       r.u8();
@@ -697,6 +732,7 @@
     var na = r.u16();
     var args = [];
     for (var i = 0; i < na; i++) {
+      _skipNoise(r);
       if (_vINV[r.buf[r.pos]] === 26) { // SPREAD_ELEM
         r.u8();
         var sv = evalNode(r, syms, strs, scope);
@@ -714,6 +750,7 @@
     var na = r.u16();
     var args = [];
     for (var i = 0; i < na; i++) {
+      _skipNoise(r);
       if (_vINV[r.buf[r.pos]] === 26) { // SPREAD_ELEM
         r.u8();
         var sv = evalNode(r, syms, strs, scope);
@@ -957,11 +994,32 @@
     _dt[_dti] = _handlers[_vINV[_dti]];
   }
 
+  // Feature 3: stateful accumulator — tracked but not used in real value computation.
+  // Exists to make the bytecode stateful so static analysis must track _vmAcc correctly.
+  var _vmAcc = 0;
+
   function evalNode(r, syms, strs, scope) {
-    var raw = r.u8();
-    var _h = _dt[raw];
-    if (!_h) throw new Error("[vobf] t:" + raw);
-    return _h(r, syms, strs, scope);
+    for (;;) {
+      var raw = r.u8();
+      // Feature 2: decoy opcodes 200..207 — skip payload and continue dispatch
+      if (raw >= 200 && raw <= 207) {
+        var _dLen = r.u8();
+        r.pos += _dLen;
+        continue;
+      }
+      // Feature 3: stateful opcodes
+      if (raw === 210) { // STATE_SET
+        _vmAcc = r.u8();
+        continue;
+      }
+      if (raw === 211) { // STATE_XOR
+        _vmAcc ^= r.u8();
+        continue;
+      }
+      var _h = _dt[raw];
+      if (!_h) throw new Error("[vobf] t:" + raw);
+      return _h(r, syms, strs, scope);
+    }
   }
 
   // ── Shared runner — called once plaintext bytes are available ────────────
