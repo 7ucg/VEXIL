@@ -16,10 +16,13 @@ export interface ObfOptions {
     agentDisrupt?: boolean;
     antiLLM?: boolean;
     poisonIdentifiers?: boolean;
+    poisonStringArray?: boolean;
+    envKeyBind?: 'node' | 'browser' | false;
     jumpEncoding?: boolean;
     decoyOpcodes?: boolean;
     statefulOpcodes?: boolean;
     stackEncoding?: boolean;
+    macroOps?: boolean;
 }
 export interface BatchResult {
     path: string;
@@ -44,6 +47,8 @@ export declare const PRESETS: {
         integrityTrap: true;
         callStackCheck: true;
         agentDisrupt: true;
+        antiLLM: true;
+        poisonStringArray: true;
     };
     max: {
         pass2: true;
@@ -56,6 +61,9 @@ export declare const PRESETS: {
         agentDisrupt: true;
         callStackCheck: true;
         antiLLM: true;
+        poisonIdentifiers: true;
+        poisonStringArray: true;
+        macroOps: true;
     };
 };
 export declare function exportPreset(opts: ObfOptions): string;
@@ -73,5 +81,6 @@ export type { BundleObfOptions } from './bundle';
 export { vexilRollupPlugin } from './rollup-plugin';
 export { vexil as vexilVitePlugin } from './vite-plugin';
 export { VexilWebpackPlugin } from './webpack-plugin';
+export { vexilEsbuildPlugin } from './esbuild-plugin';
 export declare function reObfuscate(code: string, opts?: Pass3Options): Promise<string>;
 export declare function obfuscateDart(source: string): Promise<string>;

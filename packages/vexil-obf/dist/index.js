@@ -1,6 +1,6 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.VexilWebpackPlugin = exports.vexilVitePlugin = exports.vexilRollupPlugin = exports.bundleAndObfuscate = exports.PRESETS = void 0;
+exports.vexilEsbuildPlugin = exports.VexilWebpackPlugin = exports.vexilVitePlugin = exports.vexilRollupPlugin = exports.bundleAndObfuscate = exports.PRESETS = void 0;
 exports.obfuscateJs = obfuscateJs;
 exports.exportPreset = exportPreset;
 exports.importPreset = importPreset;
@@ -51,9 +51,24 @@ function resolvePass3Opts(opts) {
         shorthands.agentDisrupt = opts.agentDisrupt;
     if (opts.antiLLM !== undefined)
         shorthands.antiLLM = opts.antiLLM;
+    // poisonStringArray: explicit opt takes precedence; otherwise auto-enable when antiLLM: true
+    if (opts.poisonStringArray !== undefined) {
+        shorthands.poisonStringArray = opts.poisonStringArray;
+    }
+    else if (opts.antiLLM === true) {
+        shorthands.poisonStringArray = true;
+    }
+    if (opts.envKeyBind !== undefined)
+        shorthands.envKeyBind = opts.envKeyBind;
     if (opt === true || opt === undefined)
         return { ...defaults, ...shorthands };
     return { ...defaults, ...shorthands, ...opt };
+}
+function stripSourceMaps(code) {
+    code = code.replace(/\/\/# sourceMappingURL=\S+/g, '');
+    code = code.replace(/\/\*# sourceMappingURL=[\s\S]*?\*\//g, '');
+    code = code.replace(/\/\/# sourceURL=\S+/g, '');
+    return code;
 }
 async function obfuscateJs(source, opts = {}) {
     const p3opts = resolvePass3Opts(opts);
@@ -67,19 +82,19 @@ async function obfuscateJs(source, opts = {}) {
     if (opts.pass2 !== false) {
         const wasm = await loadWasm();
         if (wasm) {
-            const result = wasm.obf_process_js(astJson, opts.envFingerprint ?? false, opts.format ?? 'cjs');
+            const result = wasm.obf_process_js(astJson, opts.envFingerprint ?? false, opts.format ?? 'cjs', opts.macroOps !== false);
             const p2code = result.js;
-            const finalCode = p3opts !== false ? (0, pass3_1.pass3)(p2code, p3opts, result.build_id_b64) : p2code;
+            const rawCode = p3opts !== false ? (0, pass3_1.pass3)(p2code, p3opts, result.build_id_b64) : p2code;
             return {
-                code: finalCode,
+                code: stripSourceMaps(rawCode),
                 key: result.key_b64,
                 buildId: result.build_id_b64,
             };
         }
     }
     // WASM not available: return pass1 result (optionally pass3'd)
-    const finalCode = p3opts !== false ? (0, pass3_1.pass3)(pass1Code, p3opts) : pass1Code;
-    return { code: finalCode };
+    const rawCode = p3opts !== false ? (0, pass3_1.pass3)(pass1Code, p3opts) : pass1Code;
+    return { code: stripSourceMaps(rawCode) };
 }
 exports.PRESETS = {
     fast: {
@@ -93,6 +108,8 @@ exports.PRESETS = {
         integrityTrap: true,
         callStackCheck: true,
         agentDisrupt: true,
+        antiLLM: true,
+        poisonStringArray: true,
     },
     max: {
         pass2: true,
@@ -105,6 +122,9 @@ exports.PRESETS = {
         agentDisrupt: true,
         callStackCheck: true,
         antiLLM: true,
+        poisonIdentifiers: true,
+        poisonStringArray: true,
+        macroOps: true,
     },
 };
 function exportPreset(opts) {
@@ -147,6 +167,8 @@ var vite_plugin_1 = require("./vite-plugin");
 Object.defineProperty(exports, "vexilVitePlugin", { enumerable: true, get: function () { return vite_plugin_1.vexil; } });
 var webpack_plugin_1 = require("./webpack-plugin");
 Object.defineProperty(exports, "VexilWebpackPlugin", { enumerable: true, get: function () { return webpack_plugin_1.VexilWebpackPlugin; } });
+var esbuild_plugin_1 = require("./esbuild-plugin");
+Object.defineProperty(exports, "vexilEsbuildPlugin", { enumerable: true, get: function () { return esbuild_plugin_1.vexilEsbuildPlugin; } });
 // Re-obfuscate already-obfuscated JS (applies pass3 — identifier renaming, no string re-encryption).
 async function reObfuscate(code, opts = {}) {
     return (0, pass3_1.pass3)(code, { hexNumbers: true, ...opts });

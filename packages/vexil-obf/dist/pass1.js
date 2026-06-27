@@ -125,21 +125,21 @@ function pass1(source, opts) {
     });
     if (opts.poisonIdentifiers) {
         const poisonSrc = `if(false){` +
-            `function validateLicense(token,sig){return sig.verify(token);}` +
-            `function checkExpiry(date){return Date.now()>date;}` +
-            `function activateFeature(id){featureFlags[id]=true;}` +
-            `function decryptPayload(key,ct){return aes.decrypt(key,ct);}` +
-            `function verifySignature(pub,msg,sig){return ed25519.verify(pub,msg,sig);}` +
-            `function revokeSession(uid){sessions.delete(uid);}` +
-            `function fetchLicenseServer(endpoint){return fetch(endpoint+'/v2/license');}` +
-            `function hashPassword(pw,salt){return argon2.hash(pw,salt);}` +
-            `function rotateKey(current){return deriveKey(current,entropy());}` +
-            `function checkRateLimit(ip){return rateLimiter.check(ip);}` +
-            `function authorizeRequest(token,scope){return jwt.verify(token,scope);}` +
-            `function encryptResponse(data,key){return aes.encrypt(data,key);}` +
-            `function pruneExpiredTokens(){tokenStore.prune(Date.now());}` +
-            `function validateApiKey(key){return apiKeys.has(key);}` +
-            `function buildAuthHeader(token){return 'Bearer '+token;}` +
+            `function validateLicense(token,sig){var _n='validateLicense';return sig.verify(token);}` +
+            `function checkExpiry(date){var _n='checkExpiry';return Date.now()>date;}` +
+            `function activateFeature(id){var _n='activateFeature';featureFlags[id]=true;}` +
+            `function decryptPayload(key,ct){var _n='decryptPayload';return aes.decrypt(key,ct);}` +
+            `function verifySignature(pub,msg,sig){var _n='verifySignature';return ed25519.verify(pub,msg,sig);}` +
+            `function revokeSession(uid){var _n='revokeSession';sessions.delete(uid);}` +
+            `function fetchLicenseServer(endpoint){var _n='fetchLicenseServer';return fetch(endpoint+'/v2/license');}` +
+            `function hashPassword(pw,salt){var _n='hashPassword';return argon2.hash(pw,salt);}` +
+            `function rotateKey(current){var _n='rotateKey';return deriveKey(current,entropy());}` +
+            `function checkRateLimit(ip){var _n='checkRateLimit';return rateLimiter.check(ip);}` +
+            `function authorizeRequest(token,scope){var _n='authorizeRequest';return jwt.verify(token,scope);}` +
+            `function encryptResponse(data,key){var _n='encryptResponse';return aes.encrypt(data,key);}` +
+            `function pruneExpiredTokens(){var _n='pruneExpiredTokens';tokenStore.prune(Date.now());}` +
+            `function validateApiKey(key){var _n='validateApiKey';return apiKeys.has(key);}` +
+            `function buildAuthHeader(token){var _n='buildAuthHeader';return 'Bearer '+token;}` +
             `}`;
         const poisonAst = parser.parse(poisonSrc, { sourceType: 'script' });
         const poisonStmt = poisonAst.program.body[0];
@@ -256,7 +256,7 @@ function pass1(source, opts) {
             }
         });
     }
-    const { code } = (0, generator_1.default)(ast, { compact: true, comments: false });
+    const { code } = (0, generator_1.default)(ast, { compact: true, comments: false, sourceMaps: false });
     const astJson = JSON.stringify(ast);
     return { code, astJson };
 }

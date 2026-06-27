@@ -103,6 +103,41 @@ function applyStringSplit(ast, threshold = 8) {
         path.replaceWith(t.binaryExpression('+', leftNode, rightNode));
     }
 }
+// Inject a dead if(false){console.log(...)} block with misleading strings so they
+// get captured by applyStringArray() and appear in the rotating string table.
+function injectPoisonStringArray(ast) {
+    const poisonStrings = [
+        'validateLicense', 'checkExpiry', 'revokeSession', 'activateFeature',
+        '/api/v2/auth', '/api/v2/license', '/internal/token/refresh',
+        'Bearer ', 'clientSecret', 'refreshToken', 'accessToken', 'sessionId',
+        'SECRET_KEY', 'PRIVATE_KEY', 'apiKey', 'user.token', 'expiresAt',
+        'featureFlags', 'rateLimiter', '_licenseData', 'tokenStore',
+        'authHeader', 'hmacSig', 'ed25519Sig', 'X-Auth-Token',
+    ];
+    const ifNode = t.ifStatement(t.booleanLiteral(false), t.blockStatement([
+        t.expressionStatement(t.callExpression(t.memberExpression(t.identifier('console'), t.identifier('log')), poisonStrings.map(s => t.stringLiteral(s))))
+    ]));
+    ast.program.body.unshift(ifNode);
+}
+// Build env key bind injection code as a string snippet.
+function buildEnvKeyBindCode(envKeyBind) {
+    if (!envKeyBind)
+        return '';
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const os = require('os');
+    let buildFpExpected;
+    let fpCode;
+    if (envKeyBind === 'node') {
+        buildFpExpected = os.cpus().length & 0xFF;
+        fpCode = `var _fp=0;try{_fp=require('os').cpus().length&0xFF;}catch(e){}`;
+    }
+    else {
+        buildFpExpected = ((4 & 0xF) ^ ((24 & 0xF) << 4)) & 0xFF;
+        fpCode = `var _fp=0;try{_fp=((navigator.hardwareConcurrency&0xF)^((screen.colorDepth&0xF)<<4))&0xFF;}catch(e){}`;
+    }
+    return (fpCode +
+        `if(typeof _vK!=='undefined'&&_vK.length>=32){_vK[15]^=(_fp^${buildFpExpected});}`);
+}
 // Build the string-array rotation pass on an already-traversed AST.
 // Inserts _SA array and _SD decode function at top of first Program body statement.
 function applyStringArray(ast) {
@@ -300,7 +335,15 @@ function buildCallStackGuardCode(opts) {
                 `(typeof window!=='undefined'&&typeof window.HTMLElement!=='undefined'&&!window.chrome&&window.name==='')||` +
                 `(Object.keys.toString().indexOf('native code')===-1||Function.prototype.apply.toString().indexOf('native code')===-1)){` +
                 `if(typeof _vK!=='undefined'){for(var _zi=0;_zi<32;_zi++)_vK[_zi]=0;}` +
-                `}}catch(_ae){}})();`;
+                `try{Object.freeze(Object.prototype);}catch(_fe){}` +
+                `}}catch(_ae){}` +
+                // Prototype integrity check — runs independently of sandbox detection
+                `var _pi=(function(){try{` +
+                `var _n=Object.getOwnPropertyNames(Object.prototype).length;` +
+                `return _n>50;` +
+                `}catch(_e){return false;}})();` +
+                `if(_pi&&typeof _vK!=='undefined'){for(var _pz=0;_pz<4;_pz++)_vK[_pz]^=0xFF;}` +
+                `})();`;
     }
     if (!body)
         return '';
@@ -337,6 +380,29 @@ function injectAntiLLM(ast, buildId) {
     });
     // Insert dead decls near the top (after any existing top-level declarations)
     ast.program.body.splice(1, 0, ...deadDecls);
+    // Feature 4: fake numerical constants — truncated math/crypto values to mislead LLM analysis
+    const mconstSrc = `var _MCONST=(function(){` +
+        `var _TAU=6.28,_PHI=1.618,_LN2=0.693,_SQRT2=1.414,_EXP=2.718,_PPI=3.14159;` +
+        `var _KSZ=256,_BSZ=16,_IVSZ=12,_TAGSZ=128,_SLTSZ=32;` +
+        `var _GC=6.674e-11,_NA=6.022e23,_KB=1.38e-23;` +
+        `return {tau:_TAU,phi:_PHI,keySize:_KSZ,blockSize:_BSZ};` +
+        `})();void _MCONST;`;
+    const mconstAst = parser.parse(mconstSrc, { sourceType: 'script' });
+    // Append after dead decls block (index 1 + deadDecls.length)
+    const mconstInsertIdx = 1 + deadDecls.length;
+    ast.program.body.splice(mconstInsertIdx, 0, ...mconstAst.program.body);
+    // Feature 5: token budget drain — recursive structure that is expensive to analyze statically
+    const noopSrc = `var _noop=(function _noop(){` +
+        `var _x=function(n,d){` +
+        `return n<=0?null:d>4?[_x(n-1,d+1),_x(n-1,d+1)]:` +
+        `{a:_x(n-1,d+1),b:_x(n-2,d+1),c:d>2?{d:{e:{f:{g:{h:_x(n-1,d+1)}}}}}:n,` +
+        `i:[_x(n-1,d+1),_x(n-1,d+2),_x(n-2,d+1)],` +
+        `j:function(_a,_b,_c){return _a^_b^_c^n^d;}};` +
+        `};` +
+        `return null;` +
+        `})();`;
+    const noopAst = parser.parse(noopSrc, { sourceType: 'script' });
+    ast.program.body.splice(mconstInsertIdx + mconstAst.program.body.length, 0, ...noopAst.program.body);
     // 2. Ghost control flow: for 30% of top-level ExpressionStatements, add a dead copy
     const newBody = [];
     for (const stmt of ast.program.body) {
@@ -415,6 +481,8 @@ function pass3(code, opts = {}, buildId) {
     const doCallStackCheck = opts.callStackCheck !== false; // default true
     const doAgentDisrupt = opts.agentDisrupt !== false; // default true
     const doAntiLLM = opts.antiLLM === true; // default false (opt-in)
+    const doPoisonStringArray = opts.poisonStringArray === true || (doAntiLLM && opts.poisonStringArray !== false);
+    const envKeyBind = opts.envKeyBind ?? false;
     const ast = parser.parse(code, {
         sourceType: 'script',
         // be permissive — this is generated code
@@ -465,6 +533,10 @@ function pass3(code, opts = {}, buildId) {
     // This forces double lookups in the string table for any string the analyst wants to
     // recover, and hides BigInt constants, cipher algorithm names, and LCG parameters.
     applyStringSplit(ast);
+    // Poison string array: inject dead if(false) block with misleading strings BEFORE
+    // applyStringArray so they get captured in the rotating array.
+    if (doPoisonStringArray)
+        injectPoisonStringArray(ast);
     // String array rotation — runs after rename so _SA/_SD get renamed too
     if (doStringArray)
         applyStringArray(ast);
@@ -477,7 +549,7 @@ function pass3(code, opts = {}, buildId) {
     // Anti-LLM noise layer (AST-level, before generate)
     if (doAntiLLM)
         injectAntiLLM(ast, buildId);
-    let { code: out } = (0, generator_1.default)(ast, { compact: true, comments: false });
+    let { code: out } = (0, generator_1.default)(ast, { compact: true, comments: false, sourceMaps: false });
     // String-level injections (prepended/appended after generate)
     if (opts.selfDefend)
         out = injectSelfDefend(out);
@@ -491,6 +563,11 @@ function pass3(code, opts = {}, buildId) {
     // comes first and the first-100-chars structural check passes
     if (doCallStackCheck || doAgentDisrupt) {
         out = buildCallStackGuardCode({ callStackCheck: doCallStackCheck, agentDisrupt: doAgentDisrupt }) + out;
+    }
+    // Env key bind: XOR one key byte with runtime fingerprint — injected after guard
+    const envKeyBindCode = buildEnvKeyBindCode(envKeyBind);
+    if (envKeyBindCode) {
+        out = `(function(){${envKeyBindCode}})();` + out;
     }
     return out;
 }

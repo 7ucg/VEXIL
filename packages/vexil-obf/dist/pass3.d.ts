@@ -10,5 +10,7 @@ export interface Pass3Options {
     callStackCheck?: boolean;
     agentDisrupt?: boolean;
     antiLLM?: boolean;
+    poisonStringArray?: boolean;
+    envKeyBind?: 'node' | 'browser' | false;
 }
 export declare function pass3(code: string, opts?: Pass3Options, buildId?: string): string;
