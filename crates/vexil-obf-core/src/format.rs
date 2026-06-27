@@ -96,14 +96,6 @@ impl SymbolTable {
         }
     }
 
-    /// Encode the symbol and string tables to their wire format (no scope encoding).
-    ///
-    /// Symbol table: u16 n_syms, then for each: u8 len, bytes…
-    /// String table: u16 n_strs, then for each: u16 len, bytes…
-    pub fn encode(&self) -> Result<Vec<u8>, crate::ObfError> {
-        self.encode_with_scope_key(0)
-    }
-
     /// Encode with scope_key_byte XOR applied to all symbol string bytes (Feature 4).
     /// String table is NOT XOR-encoded (strings are not used as scope keys).
     pub fn encode_with_scope_key(&self, scope_key_byte: u8) -> Result<Vec<u8>, crate::ObfError> {
