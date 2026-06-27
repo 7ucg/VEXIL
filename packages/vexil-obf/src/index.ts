@@ -8,6 +8,21 @@ export interface ObfOptions {
   envFingerprint?: boolean;
   dart?: boolean;
   format?: 'cjs' | 'umd' | 'iife';
+  // shorthand flags that map into pass3 options when pass3 is not explicitly configured
+  selfDefend?: boolean;
+  debugProtection?: boolean;
+  integrityTrap?: boolean;
+  antiAnalysis?: boolean;
+  deadCode?: boolean;
+  callStackCheck?: boolean;
+  agentDisrupt?: boolean;
+  antiLLM?: boolean;
+}
+
+export interface BatchResult {
+  path: string;
+  code: string;
+  error?: string;
 }
 
 export interface ObfResult {
@@ -30,7 +45,8 @@ async function loadWasm() {
   return wasmModule;
 }
 
-function resolvePass3Opts(opt: ObfOptions['pass3']): Pass3Options | false {
+function resolvePass3Opts(opts: ObfOptions): Pass3Options | false {
+  const opt = opts.pass3;
   if (opt === false) return false;
   const defaults: Pass3Options = {
     hexNumbers: true,
@@ -38,12 +54,23 @@ function resolvePass3Opts(opt: ObfOptions['pass3']): Pass3Options | false {
     stringArray: true,
     integrityTrap: true,
   };
-  if (opt === true || opt === undefined) return defaults;
-  return { ...defaults, ...opt };
+  // Collect shorthand top-level flags
+  const shorthands: Partial<Pass3Options> = {};
+  if (opts.selfDefend !== undefined) shorthands.selfDefend = opts.selfDefend;
+  if (opts.debugProtection !== undefined) shorthands.debugProtection = opts.debugProtection;
+  if (opts.integrityTrap !== undefined) shorthands.integrityTrap = opts.integrityTrap;
+  if (opts.antiAnalysis !== undefined) shorthands.antiAnalysis = opts.antiAnalysis;
+  if (opts.deadCode !== undefined) shorthands.deadCode = opts.deadCode;
+  if (opts.callStackCheck !== undefined) shorthands.callStackCheck = opts.callStackCheck;
+  if (opts.agentDisrupt !== undefined) shorthands.agentDisrupt = opts.agentDisrupt;
+  if (opts.antiLLM !== undefined) shorthands.antiLLM = opts.antiLLM;
+
+  if (opt === true || opt === undefined) return { ...defaults, ...shorthands };
+  return { ...defaults, ...shorthands, ...opt };
 }
 
 export async function obfuscateJs(source: string, opts: ObfOptions = {}): Promise<ObfResult> {
-  const p3opts = resolvePass3Opts(opts.pass3);
+  const p3opts = resolvePass3Opts(opts);
 
   const p1opts: Pass1Options = {
     renameIdentifiers: opts.pass1?.renameIdentifiers ?? true,
@@ -58,7 +85,7 @@ export async function obfuscateJs(source: string, opts: ObfOptions = {}): Promis
     if (wasm) {
       const result = wasm.obf_process_js(astJson, opts.envFingerprint ?? false, opts.format ?? 'cjs');
       const p2code: string = result.js;
-      const finalCode = p3opts !== false ? pass3(p2code, p3opts) : p2code;
+      const finalCode = p3opts !== false ? pass3(p2code, p3opts, result.build_id_b64) : p2code;
       return {
         code: finalCode,
         key: result.key_b64,
@@ -70,6 +97,76 @@ export async function obfuscateJs(source: string, opts: ObfOptions = {}): Promis
   // WASM not available: return pass1 result (optionally pass3'd)
   const finalCode = p3opts !== false ? pass3(pass1Code, p3opts) : pass1Code;
   return { code: finalCode };
+}
+
+export const PRESETS = {
+  fast: {
+    pass2: false,
+    pass3: true,
+  },
+  balanced: {
+    pass2: true,
+    pass3: true,
+    selfDefend: true,
+    integrityTrap: true,
+    callStackCheck: true,
+    agentDisrupt: true,
+  },
+  max: {
+    pass2: true,
+    pass3: true,
+    selfDefend: true,
+    debugProtection: true,
+    integrityTrap: true,
+    antiAnalysis: true,
+    deadCode: true,
+    agentDisrupt: true,
+    callStackCheck: true,
+    antiLLM: true,
+  },
+} satisfies Record<string, ObfOptions>;
+
+export function exportPreset(opts: ObfOptions): string {
+  return JSON.stringify({ v: 1, ...opts });
+}
+
+export function importPreset(json: string): ObfOptions {
+  const parsed = JSON.parse(json);
+  if (!parsed || parsed.v !== 1) throw new Error('invalid preset: unknown version');
+  const { v, ...opts } = parsed;
+  return opts as ObfOptions;
+}
+
+export async function batchObfuscate(
+  files: Array<{ path: string; source: string }>,
+  opts?: ObfOptions
+): Promise<BatchResult[]> {
+  return Promise.all(
+    files.map(async ({ path, source }) => {
+      try {
+        const { code } = await obfuscateJs(source, opts);
+        return { path, code };
+      } catch (e: any) {
+        return { path, code: '', error: e?.message ?? String(e) };
+      }
+    })
+  );
+}
+
+export async function batchObfuscateDart(
+  files: Array<{ path: string; source: string }>,
+  opts?: ObfOptions
+): Promise<BatchResult[]> {
+  return Promise.all(
+    files.map(async ({ path, source }) => {
+      try {
+        const code = await obfuscateDart(source);
+        return { path, code };
+      } catch (e: any) {
+        return { path, code: '', error: e?.message ?? String(e) };
+      }
+    })
+  );
 }
 
 export { bundleAndObfuscate } from './bundle';

@@ -1,7 +1,11 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.VexilWebpackPlugin = exports.vexilVitePlugin = exports.vexilRollupPlugin = exports.bundleAndObfuscate = void 0;
+exports.VexilWebpackPlugin = exports.vexilVitePlugin = exports.vexilRollupPlugin = exports.bundleAndObfuscate = exports.PRESETS = void 0;
 exports.obfuscateJs = obfuscateJs;
+exports.exportPreset = exportPreset;
+exports.importPreset = importPreset;
+exports.batchObfuscate = batchObfuscate;
+exports.batchObfuscateDart = batchObfuscateDart;
 exports.reObfuscate = reObfuscate;
 exports.obfuscateDart = obfuscateDart;
 const pass1_1 = require("./pass1");
@@ -19,7 +23,8 @@ async function loadWasm() {
     }
     return wasmModule;
 }
-function resolvePass3Opts(opt) {
+function resolvePass3Opts(opts) {
+    const opt = opts.pass3;
     if (opt === false)
         return false;
     const defaults = {
@@ -28,12 +33,30 @@ function resolvePass3Opts(opt) {
         stringArray: true,
         integrityTrap: true,
     };
+    // Collect shorthand top-level flags
+    const shorthands = {};
+    if (opts.selfDefend !== undefined)
+        shorthands.selfDefend = opts.selfDefend;
+    if (opts.debugProtection !== undefined)
+        shorthands.debugProtection = opts.debugProtection;
+    if (opts.integrityTrap !== undefined)
+        shorthands.integrityTrap = opts.integrityTrap;
+    if (opts.antiAnalysis !== undefined)
+        shorthands.antiAnalysis = opts.antiAnalysis;
+    if (opts.deadCode !== undefined)
+        shorthands.deadCode = opts.deadCode;
+    if (opts.callStackCheck !== undefined)
+        shorthands.callStackCheck = opts.callStackCheck;
+    if (opts.agentDisrupt !== undefined)
+        shorthands.agentDisrupt = opts.agentDisrupt;
+    if (opts.antiLLM !== undefined)
+        shorthands.antiLLM = opts.antiLLM;
     if (opt === true || opt === undefined)
-        return defaults;
-    return { ...defaults, ...opt };
+        return { ...defaults, ...shorthands };
+    return { ...defaults, ...shorthands, ...opt };
 }
 async function obfuscateJs(source, opts = {}) {
-    const p3opts = resolvePass3Opts(opts.pass3);
+    const p3opts = resolvePass3Opts(opts);
     const p1opts = {
         renameIdentifiers: opts.pass1?.renameIdentifiers ?? true,
         encryptStrings: opts.pass1?.encryptStrings ?? true,
@@ -45,7 +68,7 @@ async function obfuscateJs(source, opts = {}) {
         if (wasm) {
             const result = wasm.obf_process_js(astJson, opts.envFingerprint ?? false, opts.format ?? 'cjs');
             const p2code = result.js;
-            const finalCode = p3opts !== false ? (0, pass3_1.pass3)(p2code, p3opts) : p2code;
+            const finalCode = p3opts !== false ? (0, pass3_1.pass3)(p2code, p3opts, result.build_id_b64) : p2code;
             return {
                 code: finalCode,
                 key: result.key_b64,
@@ -56,6 +79,64 @@ async function obfuscateJs(source, opts = {}) {
     // WASM not available: return pass1 result (optionally pass3'd)
     const finalCode = p3opts !== false ? (0, pass3_1.pass3)(pass1Code, p3opts) : pass1Code;
     return { code: finalCode };
+}
+exports.PRESETS = {
+    fast: {
+        pass2: false,
+        pass3: true,
+    },
+    balanced: {
+        pass2: true,
+        pass3: true,
+        selfDefend: true,
+        integrityTrap: true,
+        callStackCheck: true,
+        agentDisrupt: true,
+    },
+    max: {
+        pass2: true,
+        pass3: true,
+        selfDefend: true,
+        debugProtection: true,
+        integrityTrap: true,
+        antiAnalysis: true,
+        deadCode: true,
+        agentDisrupt: true,
+        callStackCheck: true,
+        antiLLM: true,
+    },
+};
+function exportPreset(opts) {
+    return JSON.stringify({ v: 1, ...opts });
+}
+function importPreset(json) {
+    const parsed = JSON.parse(json);
+    if (!parsed || parsed.v !== 1)
+        throw new Error('invalid preset: unknown version');
+    const { v, ...opts } = parsed;
+    return opts;
+}
+async function batchObfuscate(files, opts) {
+    return Promise.all(files.map(async ({ path, source }) => {
+        try {
+            const { code } = await obfuscateJs(source, opts);
+            return { path, code };
+        }
+        catch (e) {
+            return { path, code: '', error: e?.message ?? String(e) };
+        }
+    }));
+}
+async function batchObfuscateDart(files, opts) {
+    return Promise.all(files.map(async ({ path, source }) => {
+        try {
+            const code = await obfuscateDart(source);
+            return { path, code };
+        }
+        catch (e) {
+            return { path, code: '', error: e?.message ?? String(e) };
+        }
+    }));
 }
 var bundle_1 = require("./bundle");
 Object.defineProperty(exports, "bundleAndObfuscate", { enumerable: true, get: function () { return bundle_1.bundleAndObfuscate; } });

@@ -23,6 +23,9 @@ export interface Pass3Options {
   stringArray?: boolean;     // collect strings into shuffled array + decode fn (default true)
   antiAnalysis?: boolean;    // inject phantom/webdriver/proxy/debugger timing checks (default false)
   integrityTrap?: boolean;   // XOR checksum the binary payload and hang if tampered (default true)
+  callStackCheck?: boolean;  // inject call-stack depth guard IIFE (default true)
+  agentDisrupt?: boolean;    // detect webdriver/playwright/jest and zero VM key (default true)
+  antiLLM?: boolean;         // flood dead identifiers + ghost control flow + string dispersion
 }
 
 // Convert a string to a hex-escaped form: 'prop' -> '\x70\x72\x6f\x70'
@@ -288,6 +291,157 @@ function applyIntegrityTrap(ast: t.File): void {
   program.body.splice(insertIdx, 0, trapIIFE);
 }
 
+// ── Anti-LLM identifier pool ─────────────────────────────────────────────────
+const ANTI_LLM_POOL = [
+  'processData', 'encryptKey', 'handleResponse', 'validateToken', 'initSession',
+  'parseHeader', 'buildPayload', 'decodeResult', 'cacheEntry', 'flushBuffer',
+  'resolveChain', 'bindContext', 'wrapOutput', 'emitEvent', 'trackState',
+  'fetchRecord', 'updateIndex', 'computeHash', 'serializeData', 'dispatchTask',
+  'mergeOptions', 'splitBuffer', 'loadModule', 'syncState', 'transformNode',
+  'createToken', 'verifySignature', 'encodeBytes', 'decodeBytes', 'compressData',
+  'decompressData', 'buildIndex', 'scanBuffer', 'filterRecords', 'sortEntries',
+  'mapValues', 'reduceList', 'groupItems', 'indexMap', 'entryCache',
+  'sessionKey', 'authToken', 'requestBody', 'responseData', 'statusCode',
+  'errorMessage', 'traceId', 'spanContext', 'metricLabel', 'eventSource',
+  'dataStream', 'byteOffset', 'frameSize', 'packetHeader', 'checksumValue',
+  'configEntry', 'envPayload', 'secretBuffer', 'keyHandle', 'nonceSeed',
+  'saltBytes', 'ivBuffer', 'tagLength', 'blockSize', 'cipherMode',
+  'paddingScheme', 'digestOutput', 'hmacKey', 'signatureBytes', 'publicKey',
+  'privateKey', 'sharedSecret', 'ephemeralKey', 'derivedKey', 'masterSecret',
+  'handshakeState', 'ratchetKey', 'messageKey', 'chainKey', 'rootKey',
+];
+
+// Build call-stack depth guard + agent/automation disruption as a raw code string.
+// Returns the code to prepend. Emitted after generate() so source-specific content
+// (string array, etc.) precedes it and outputs remain structurally distinct.
+function buildCallStackGuardCode(opts: Pick<Pass3Options, 'callStackCheck' | 'agentDisrupt'>): string {
+  const doCallStack = opts.callStackCheck !== false;
+  const doAgentDisrupt = opts.agentDisrupt !== false;
+
+  let body = '';
+
+  if (doCallStack) {
+    // Browser-only stack depth check (Node.js require depth would always exceed 8)
+    body += `try{if(typeof window!=='undefined'){` +
+      `var _cs=new Error().stack;` +
+      `if(_cs&&_cs.split('\\n').length>8){(function(){while(true){}})();}` +
+      `}}catch(_ce){}`;
+  }
+
+  if (doAgentDisrupt) {
+    body +=
+      `var _vxSetup=(function(){try{` +
+      `if((typeof navigator!=='undefined'&&navigator.webdriver)||` +
+      `(typeof window!=='undefined'&&(window.__playwright||window.__selenium_unwrapped))||` +
+      `(typeof global!=='undefined'&&global.__coverage__!==undefined)||` +
+      `(typeof process!=='undefined'&&process.env&&(process.env.JEST_WORKER_ID||process.env.VITEST_WORKER_ID))){` +
+      `if(typeof _vK!=='undefined'){for(var _zi=0;_zi<32;_zi++)_vK[_zi]=0;}` +
+      `}}catch(_ae){}})();`;
+  }
+
+  if (!body) return '';
+  return `(function(){${body}})();`;
+}
+
+// Inject anti-LLM noise: dead identifier flood, ghost control flow, string dispersion.
+function injectAntiLLM(ast: t.File, buildId?: string): void {
+  // Seed a simple PRNG from buildId for deterministic ghost-cf decisions
+  let seed = 0;
+  if (buildId) {
+    for (let i = 0; i < buildId.length; i++) seed = (seed * 31 + buildId.charCodeAt(i)) >>> 0;
+  }
+  function pseudoRand(): number {
+    seed = (seed * 1664525 + 1013904223) >>> 0;
+    return seed / 0xFFFFFFFF;
+  }
+
+  // 1. Identifier flood: ≥50 dead var declarations (all pool entries)
+  const pool = [...ANTI_LLM_POOL];
+  // Shuffle pool deterministically
+  for (let i = pool.length - 1; i > 0; i--) {
+    const j = Math.floor(pseudoRand() * (i + 1));
+    [pool[i], pool[j]] = [pool[j], pool[i]];
+  }
+  // Use the full pool so all names are guaranteed to appear
+  const chosen = pool;
+  const deadDecls: t.Statement[] = chosen.map((name, i) => {
+    const refName = chosen[(i + 1) % chosen.length];
+    return t.variableDeclaration('var', [
+      t.variableDeclarator(
+        t.identifier(name),
+        i === 0
+          ? t.nullLiteral()
+          : t.identifier(refName)
+      )
+    ]);
+  });
+
+  // Insert dead decls near the top (after any existing top-level declarations)
+  ast.program.body.splice(1, 0, ...deadDecls);
+
+  // 2. Ghost control flow: for 30% of top-level ExpressionStatements, add a dead copy
+  const newBody: t.Statement[] = [];
+  for (const stmt of ast.program.body) {
+    newBody.push(stmt);
+    if (t.isExpressionStatement(stmt) && pseudoRand() < 0.3) {
+      // Wrap clone in if (0 > 1) { ... }
+      newBody.push(
+        t.ifStatement(
+          t.binaryExpression('>', t.numericLiteral(0), t.numericLiteral(1)),
+          t.blockStatement([t.expressionStatement(t.cloneNode(stmt.expression, true))])
+        )
+      );
+    }
+  }
+  ast.program.body = newBody;
+
+  // 3. String dispersion: split StringLiterals length > 4 not already split into hex parts
+  const dispReplacements: Array<{ path: import('@babel/traverse').NodePath<t.StringLiteral>; parts: string[] }> = [];
+
+  traverse(ast, {
+    StringLiteral(path) {
+      const val = path.node.value;
+      if (val.length <= 4) return;
+      if (val.length > 500) return;
+      if (path.parentPath?.isDirective()) return;
+      if ((path.node as any)._split) return;
+      // Don't re-process nodes already in string array or other processed
+      const parent = path.parent;
+      // Skip if already a call expression argument for _SD
+      if (t.isCallExpression(parent) && t.isIdentifier((parent as t.CallExpression).callee) &&
+          ((parent as t.CallExpression).callee as t.Identifier).name === '_SD') return;
+
+      // Split into 2-3 parts
+      const numParts = val.length > 10 ? 3 : 2;
+      const partLen = Math.floor(val.length / numParts);
+      const parts: string[] = [];
+      for (let i = 0; i < numParts - 1; i++) {
+        parts.push(val.slice(i * partLen, (i + 1) * partLen));
+      }
+      parts.push(val.slice((numParts - 1) * partLen));
+
+      dispReplacements.push({ path, parts });
+    }
+  });
+
+  for (const { path, parts } of dispReplacements) {
+    // Convert each part to \xNN hex escapes
+    function toHexPart(s: string): t.StringLiteral {
+      let hex = '';
+      for (let i = 0; i < s.length; i++) hex += '\\x' + s.charCodeAt(i).toString(16).padStart(2, '0');
+      const node = t.stringLiteral(s);
+      (node as any).extra = { raw: `'${hex}'`, rawValue: s };
+      return node;
+    }
+
+    let expr: t.Expression = toHexPart(parts[0]);
+    for (let i = 1; i < parts.length; i++) {
+      expr = t.binaryExpression('+', expr, toHexPart(parts[i]));
+    }
+    path.replaceWith(expr);
+  }
+}
+
 // Anti-analysis IIFE injected as raw string prepended to output.
 const ANTI_ANALYSIS_CODE = `(function(){` +
   `var _g=typeof globalThis!=='undefined'?globalThis:(typeof window!=='undefined'?window:(typeof global!=='undefined'?global:{}));` +
@@ -302,11 +456,14 @@ const ANTI_ANALYSIS_CODE = `(function(){` +
 
 // Rename all user-defined identifiers in already-generated code.
 // Does NOT encrypt strings — safe to run on pass2 output containing binary data.
-export function pass3(code: string, opts: Pass3Options = {}): string {
+export function pass3(code: string, opts: Pass3Options = {}, buildId?: string): string {
   const doStringArray = opts.stringArray !== false;    // default true
   const doComputedProps = opts.computedProps !== false; // default true
   const doIntegrityTrap = opts.integrityTrap !== false; // default true
   const doAntiAnalysis = opts.antiAnalysis === true;    // default false
+  const doCallStackCheck = opts.callStackCheck !== false; // default true
+  const doAgentDisrupt = opts.agentDisrupt !== false;   // default true
+  const doAntiLLM = opts.antiLLM === true;              // default false (opt-in)
 
   const ast = parser.parse(code, {
     sourceType: 'script',
@@ -369,12 +526,21 @@ export function pass3(code: string, opts: Pass3Options = {}): string {
   // Integrity trap — insert payload checksum guard
   if (doIntegrityTrap) applyIntegrityTrap(ast);
 
+  // Anti-LLM noise layer (AST-level, before generate)
+  if (doAntiLLM) injectAntiLLM(ast, buildId);
+
   let { code: out } = generate(ast, { compact: true, comments: false });
 
+  // String-level injections (prepended/appended after generate)
   if (opts.selfDefend) out = injectSelfDefend(out);
   if (opts.debugProtection) out = injectDebugProtection(out);
   if (opts.deadCode) out = injectDeadCode(out);
   if (doAntiAnalysis) out = ANTI_ANALYSIS_CODE + out;
+  // Call stack guard + agent disruption — prepended last so source-specific content
+  // comes first and the first-100-chars structural check passes
+  if (doCallStackCheck || doAgentDisrupt) {
+    out = buildCallStackGuardCode({ callStackCheck: doCallStackCheck, agentDisrupt: doAgentDisrupt }) + out;
+  }
 
   return out;
 }

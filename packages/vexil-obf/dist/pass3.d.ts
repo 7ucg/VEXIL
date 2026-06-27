@@ -7,5 +7,8 @@ export interface Pass3Options {
     stringArray?: boolean;
     antiAnalysis?: boolean;
     integrityTrap?: boolean;
+    callStackCheck?: boolean;
+    agentDisrupt?: boolean;
+    antiLLM?: boolean;
 }
-export declare function pass3(code: string, opts?: Pass3Options): string;
+export declare function pass3(code: string, opts?: Pass3Options, buildId?: string): string;

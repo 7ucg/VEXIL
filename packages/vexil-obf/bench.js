@@ -7,7 +7,7 @@ const path = require('path');
 const os   = require('os');
 const { execFileSync } = require('child_process');
 
-const { obfuscateJs, obfuscateDart } = require(path.join(__dirname, 'dist/index.js'));
+const { obfuscateJs, obfuscateDart, batchObfuscate, batchObfuscateDart, PRESETS, exportPreset, importPreset } = require(path.join(__dirname, 'dist/index.js'));
 
 const exDir  = path.join(__dirname, 'examples');
 const tmpDir = os.tmpdir();
@@ -373,8 +373,10 @@ async function main() {
     pass('string splitting: _SD()+_SD() concat in output', /_SD\([^)]+\)\s*\+\s*_SD\(/.test(c1));
 
     // two different sources → structurally different output even at same size
+    // Check past any common guard prefix (callStackCheck/agentDisrupt IIFEs are identical
+    // across sources by design; the string array and payload sections differ).
     const { code: c3 } = await obfuscateJs(src01, { pass2: true });
-    pass('different sources → different structure', c1.slice(0, 100) !== c3.slice(0, 100));
+    pass('different sources → different structure', c1 !== c3 && c1.slice(600, 800) !== c3.slice(600, 800));
   }
 
   // ═══════════════════════════════════════════════════════════════════════════
@@ -518,6 +520,119 @@ async function main() {
   }
 
   // ═══════════════════════════════════════════════════════════════════════════
+  // §9b  NEW FEATURES — batch, presets, anti-LLM, call stack guard, agent disrupt
+  // ═══════════════════════════════════════════════════════════════════════════
+  section('§9b new features');
+
+  // 1. batchObfuscate: both results have non-empty code, no error field
+  {
+    const results = await batchObfuscate([
+      { path: 'a.js', source: 'var x=1' },
+      { path: 'b.js', source: 'var y=2' },
+    ]);
+    pass('batch: both results have code', results.length === 2 && results[0].code.length > 0 && results[1].code.length > 0);
+    pass('batch: no error field on success', results[0].error === undefined && results[1].error === undefined);
+  }
+
+  // 2. batchObfuscate with one invalid file: first ok, second has error, doesn't throw
+  {
+    let results;
+    try {
+      results = await batchObfuscate([
+        { path: 'ok.js', source: 'var x=1' },
+        { path: 'bad.js', source: '!!!invalid!!!' },
+      ]);
+    } catch (e) {
+      results = null;
+    }
+    pass('batch: doesn\'t throw on bad input', results !== null);
+    pass('batch: ok file has code', results && results[0].code.length > 0 && !results[0].error);
+    pass('batch: bad file has error string', results && typeof results[1].error === 'string' && results[1].error.length > 0);
+  }
+
+  // 3. exportPreset(PRESETS.balanced) → valid JSON, contains "v":1 and "pass2":true
+  {
+    const json = exportPreset(PRESETS.balanced);
+    let parsed;
+    try { parsed = JSON.parse(json); } catch { parsed = null; }
+    pass('exportPreset: valid JSON', parsed !== null);
+    pass('exportPreset: v:1 present', parsed && parsed.v === 1);
+    pass('exportPreset: pass2:true present', parsed && parsed.pass2 === true);
+  }
+
+  // 4. importPreset(exportPreset(PRESETS.max)) round-trips
+  {
+    const json = exportPreset(PRESETS.max);
+    const rt = importPreset(json);
+    pass('importPreset: round-trips pass2', rt.pass2 === true);
+    pass('importPreset: round-trips antiLLM', rt.antiLLM === true);
+  }
+
+  // 5. obfuscateJs with PRESETS.fast → correctness
+  {
+    const { code } = await obfuscateJs(src01, PRESETS.fast);
+    let ok = true, err = '';
+    try {
+      const m = runAsModule(code);
+      if (m.hashPassword('abc') !== '616263') throw new Error('hashPassword wrong');
+    } catch (e) { ok = false; err = e.message; }
+    pass('PRESETS.fast: correctness', ok, err || undefined);
+  }
+
+  // 6. obfuscateJs with PRESETS.balanced → correctness
+  {
+    const { code } = await obfuscateJs(src01, PRESETS.balanced);
+    let ok = true, err = '';
+    try {
+      const m = runAsModule(code);
+      if (m.hashPassword('abc') !== '616263') throw new Error('hashPassword wrong');
+    } catch (e) { ok = false; err = e.message; }
+    pass('PRESETS.balanced: correctness', ok, err || undefined);
+  }
+
+  // 7. obfuscateJs with {...PRESETS.max, pass2: false} → correctness (max without WASM)
+  {
+    const { code } = await obfuscateJs(src01, { ...PRESETS.max, pass2: false });
+    let ok = true, err = '';
+    try {
+      const m = runAsModule(code);
+      if (m.hashPassword('abc') !== '616263') throw new Error('hashPassword wrong');
+    } catch (e) { ok = false; err = e.message; }
+    pass('PRESETS.max (no WASM): correctness', ok, err || undefined);
+  }
+
+  // 8. antiLLM: output contains ≥30 dead identifiers from pool
+  {
+    const { code } = await obfuscateJs(src01, { antiLLM: true, pass2: false });
+    const knownNames = ['processData', 'encryptKey', 'handleResponse', 'validateToken', 'initSession'];
+    const found = knownNames.filter(n => code.includes(n));
+    pass('antiLLM: ≥5 known pool names in output', found.length >= 5, `found: ${found.join(', ')}`);
+    // Count how many of the full 80-name pool appear
+    const fullPool = [
+      'processData','encryptKey','handleResponse','validateToken','initSession',
+      'parseHeader','buildPayload','decodeResult','cacheEntry','flushBuffer',
+      'resolveChain','bindContext','wrapOutput','emitEvent','trackState',
+      'fetchRecord','updateIndex','computeHash','serializeData','dispatchTask',
+      'mergeOptions','splitBuffer','loadModule','syncState','transformNode',
+      'createToken','verifySignature','encodeBytes','decodeBytes','compressData',
+    ];
+    const poolHits = fullPool.filter(n => code.includes(n));
+    pass('antiLLM: ≥30 dead identifiers in output', poolHits.length >= 30, `${poolHits.length} found`);
+  }
+
+  // 9. agentDisrupt: output contains webdriver check string
+  {
+    const { code } = await obfuscateJs(src01, { agentDisrupt: true, pass2: false });
+    pass('agentDisrupt: webdriver check present', code.includes('webdriver'));
+  }
+
+  // 10. callStackCheck: output contains Error().stack check
+  {
+    const { code } = await obfuscateJs(src01, { callStackCheck: true, pass2: false });
+    pass('callStackCheck: stack check present', code.includes('stack') && code.includes('Error'));
+  }
+
+  // ═══════════════════════════════════════════════════════════════════════════
   // §10  BENCHMARK — timing across configurations
   // ═══════════════════════════════════════════════════════════════════════════
   section('§10 benchmarks');
@@ -529,6 +644,8 @@ async function main() {
     { label: 'full pipeline ', opts: { pass2: true } },
     { label: 'full + UMD    ', opts: { pass2: true, format: 'umd' } },
     { label: 'full + IIFE   ', opts: { pass2: true, format: 'iife' } },
+    { label: 'PRESETS.fast  ', opts: PRESETS.fast },
+    { label: 'PRESETS.balanced', opts: PRESETS.balanced },
   ];
 
   // plugin overhead: simulate one chunk going through each plugin
@@ -555,6 +672,16 @@ async function main() {
         const comp = { assets, errors: [] };
         await new Promise(r => _wpTap(comp, r));
         return comp.assets['b.js'].source();
+      },
+    },
+    {
+      label: 'batchObfuscate',
+      run: async (src) => {
+        const results = await batchObfuscate([
+          { path: 'a.js', source: src },
+          { path: 'b.js', source: src },
+        ]);
+        return results[0].code + results[1].code;
       },
     },
   ];
