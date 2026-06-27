@@ -222,6 +222,41 @@ Requires `esbuild` as a peer dependency.
 
 All plugins accept the full `ObfOptions` object — every flag listed in the [Options](#options) section works in every plugin. The output `format` is always auto-detected from the bundler config and cannot be overridden via options.
 
+Full options reference (same for all four plugins):
+
+```js
+const obfOptions = {
+  // pipeline
+  pass2: true,              // binary AST + AES-256-GCM VM
+  // format is auto-detected from the bundler — do not set manually
+
+  // VM self-defense
+  integrityTrap: true,     // XOR checksum — tamper → infinite loop (default true)
+  selfDefend: true,        // DevTools timing trap
+  debugProtection: true,   // periodic debugger statement
+  callStackCheck: true,    // call stack depth guard (default true)
+  agentDisrupt: true,      // zero key on Playwright / jsdom / Jest detection (default true)
+  antiAnalysis: true,      // webdriver / phantom / proxy detection
+
+  // anti-LLM
+  antiLLM: true,           // identifier flood + ghost control flow + string dispersion
+  poisonStringArray: true, // ~25 fake API/crypto strings injected into string array
+  poisonIdentifiers: true, // 15 dead license/crypto-sounding functions as false context
+
+  // bytecode hardening (always-on when pass2:true — flags accepted for explicitness)
+  jumpEncoding: true,      // jump offsets XOR'd per build
+  decoyOpcodes: true,      // noise bytes between real instructions
+  statefulOpcodes: true,   // accumulator opcodes — naive emulation gives wrong state
+  stackEncoding: true,     // scope variable names XOR-encoded in bytecode
+  macroOps: true,          // common 2-node patterns fused into single dense opcodes
+
+  // misc
+  deadCode: true,          // inject unreachable branches
+  envFingerprint: true,    // tie decryption to VOBF_ID env var
+  envKeyBind: 'node',      // bind one key byte to runtime fingerprint ('node' | 'browser' | false)
+};
+```
+
 ### Vite plugin
 
 ```js
@@ -229,15 +264,7 @@ All plugins accept the full `ObfOptions` object — every flag listed in the [Op
 import { vexilVitePlugin } from 'vexil-obf/vite-plugin';
 
 export default {
-  plugins: [
-    vexilVitePlugin({
-      pass2: true,
-      antiLLM: true,
-      agentDisrupt: true,
-      poisonStringArray: true,
-      selfDefend: true,
-    }),
-  ],
+  plugins: [vexilVitePlugin(obfOptions)],
 };
 ```
 
@@ -248,13 +275,7 @@ export default {
 import { vexilRollupPlugin } from 'vexil-obf/rollup-plugin';
 
 export default {
-  plugins: [
-    vexilRollupPlugin({
-      pass2: true,
-      antiLLM: true,
-      agentDisrupt: true,
-    }),
-  ],
+  plugins: [vexilRollupPlugin(obfOptions)],
 };
 ```
 
@@ -267,13 +288,7 @@ Output format is detected from Rollup's own `output.format` — no need to set i
 const { VexilWebpackPlugin } = require('vexil-obf/webpack-plugin');
 
 module.exports = {
-  plugins: [
-    new VexilWebpackPlugin({
-      pass2: true,
-      antiLLM: true,
-      agentDisrupt: true,
-    }),
-  ],
+  plugins: [new VexilWebpackPlugin(obfOptions)],
 };
 ```
 
@@ -290,13 +305,7 @@ await esbuild.build({
   bundle: true,
   outfile: 'dist/bundle.js',
   write: false,  // required: plugin receives outputFiles in memory
-  plugins: [
-    vexilEsbuildPlugin({
-      pass2: true,
-      antiLLM: true,
-      agentDisrupt: true,
-    }),
-  ],
+  plugins: [vexilEsbuildPlugin(obfOptions)],
 });
 ```
 
