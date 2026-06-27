@@ -32,21 +32,38 @@ const { code } = await obfuscateJs(source, {
 
 Other tools work at the JS source level — rename identifiers, shuffle strings, flatten control flow. Someone with enough time and a deobfuscator can still read the logic. vexil-obf compiles the code to a binary format and replaces it with a VM. The encrypted payload can't be read without the key, and the key is reconstructed through a 3-step closure chain with non-linear array indexing, LCG-stream binding, and 6 mixed byte-encoding forms per build.
 
+The pipeline also has specific defenses against LLM-assisted analysis (CASCADE, JSimplifier, webcrack): string table poisoning, identifier poisoning, fake numerical constants, stateful VM opcodes, macro-op aggregation, and token budget drain structures — each targeting a different attack vector used by automated reverse engineering pipelines.
+
 | Feature | vexil-obf | javascript-obfuscator | obfuscator.io |
 |---|:---:|:---:|:---:|
 | Encrypted binary AST (not just source transforms) | ✓ | — | — |
 | AES-256-GCM authenticated payload | ✓ | — | — |
 | Per-build shuffled node type IDs | ✓ | — | — |
-| Dispatch table VM (no switch/case opcode map) | ✓ | — | — |
+| Macro-op aggregation (denser bytecode, fewer recognizable patterns) | ✓ | — | — |
+| Decoy opcodes (noise bytes between real instructions) | ✓ | — | — |
+| Stateful opcodes (accumulator — naive emulation gives wrong results) | ✓ | — | — |
+| Jump target encoding (offsets XOR'd per build) | ✓ | — | — |
+| Scope name encoding (variable names XOR'd in bytecode) | ✓ | — | — |
 | Non-linear 3-part key split | ✓ | — | — |
 | Anti-hook (toString check before decryption) | ✓ | — | — |
 | Integrity trap (tamper → infinite loop) | ✓ | — | — |
-| Vite / Rollup / webpack plugin | ✓ | — | — |
+| Call stack validation (unexpected frames → trap) | ✓ | — | — |
+| Agent/sandbox disruption (Playwright, jsdom, Jest, webdriver) | ✓ | — | — |
+| Proxy trap detection on natives | ✓ | — | — |
+| Object.prototype freeze canary | ✓ | — | — |
+| String array poisoning (fake API/crypto strings) | ✓ | — | — |
+| Identifier poisoning (misleading dead-code names) | ✓ | — | — |
+| Fake numerical constants (truncated TAU, PHI, key sizes) | ✓ | — | — |
+| Token budget drain (expensive-to-analyze dead structure) | ✓ | — | — |
+| DevTools detection + breakpoint neutralization | ✓ | — | — |
+| Runtime key binding (env fingerprint) | ✓ | — | — |
+| Vite / Rollup / webpack / esbuild plugin | ✓ | — | — |
 | Dart / Flutter obfuscation | ✓ | — | — |
+| Batch obfuscation API | ✓ | — | — |
 | String array with rotation | ✓ | ✓ | ✓ |
 | Node.js + browser (UMD/IIFE/CJS) | ✓ | ✓ | — |
 
-Vite, Rollup, and webpack plugins are included — format is auto-detected from bundler config:
+Vite, Rollup, webpack, and esbuild plugins included — format auto-detected from bundler config:
 
 ```js
 // vite.config.js
@@ -60,6 +77,10 @@ export default { plugins: [vexilRollupPlugin({ pass2: true })] };
 // webpack.config.js
 const { VexilWebpackPlugin } = require('vexil-obf/webpack-plugin');
 module.exports = { plugins: [new VexilWebpackPlugin({ pass2: true })] };
+
+// esbuild
+import { vexilEsbuildPlugin } from 'vexil-obf/esbuild-plugin';
+await esbuild.build({ plugins: [vexilEsbuildPlugin({ pass2: true })] });
 ```
 
 CLI:
