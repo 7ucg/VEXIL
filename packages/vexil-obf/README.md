@@ -7,7 +7,7 @@ Standard obfuscators are increasingly broken by LLM-assisted analysis pipelines 
 ## How it compares
 
 | Feature | vexil-obf | javascript-obfuscator | obfuscator.io |
-|---|:---:|:---:|:---:|
+| --- | :---: | :---: | :---: |
 | Encrypted binary AST (not just source transforms) | ✓ | — | — |
 | AES-256-GCM authenticated payload | ✓ | — | — |
 | Per-build shuffled node type IDs (LCG permutation) | ✓ | — | — |
@@ -54,7 +54,7 @@ Standard obfuscators are mostly broken by LLM-assisted analysis pipelines (CASCA
 
 ## How the pipeline works
 
-```
+```text
 Source JS
   │
   ▼  Pass 1 (Babel)
@@ -220,6 +220,8 @@ const { code } = await bundleAndObfuscate({
 
 Requires `esbuild` as a peer dependency.
 
+All plugins accept the full `ObfOptions` object — every flag listed in the [Options](#options) section works in every plugin. The output `format` is always auto-detected from the bundler config and cannot be overridden via options.
+
 ### Vite plugin
 
 ```js
@@ -227,7 +229,15 @@ Requires `esbuild` as a peer dependency.
 import { vexilVitePlugin } from 'vexil-obf/vite-plugin';
 
 export default {
-  plugins: [vexilVitePlugin({ pass2: true })],
+  plugins: [
+    vexilVitePlugin({
+      pass2: true,
+      antiLLM: true,
+      agentDisrupt: true,
+      poisonStringArray: true,
+      selfDefend: true,
+    }),
+  ],
 };
 ```
 
@@ -238,7 +248,13 @@ export default {
 import { vexilRollupPlugin } from 'vexil-obf/rollup-plugin';
 
 export default {
-  plugins: [vexilRollupPlugin({ pass2: true })],
+  plugins: [
+    vexilRollupPlugin({
+      pass2: true,
+      antiLLM: true,
+      agentDisrupt: true,
+    }),
+  ],
 };
 ```
 
@@ -251,11 +267,17 @@ Output format is detected from Rollup's own `output.format` — no need to set i
 const { VexilWebpackPlugin } = require('vexil-obf/webpack-plugin');
 
 module.exports = {
-  plugins: [new VexilWebpackPlugin({ pass2: true })],
+  plugins: [
+    new VexilWebpackPlugin({
+      pass2: true,
+      antiLLM: true,
+      agentDisrupt: true,
+    }),
+  ],
 };
 ```
 
-Works with webpack 4 and 5. Output format is detected from `output.libraryTarget` (webpack 4) or `output.library.type` (webpack 5). Pass `format` in the options to override.
+Works with webpack 4 and 5. Output format is detected from `output.libraryTarget` (webpack 4) or `output.library.type` (webpack 5).
 
 ### esbuild plugin
 
@@ -267,8 +289,14 @@ await esbuild.build({
   entryPoints: ['src/index.js'],
   bundle: true,
   outfile: 'dist/bundle.js',
-  write: false,  // required: onEnd needs outputFiles in memory
-  plugins: [vexilEsbuildPlugin({ pass2: true })],
+  write: false,  // required: plugin receives outputFiles in memory
+  plugins: [
+    vexilEsbuildPlugin({
+      pass2: true,
+      antiLLM: true,
+      agentDisrupt: true,
+    }),
+  ],
 });
 ```
 
@@ -331,7 +359,7 @@ UMD and IIFE output includes a `require()` stub for common Node modules (`path`,
 Measured on a mid-range desktop, full pass1 + pass2 + pass3 pipeline:
 
 | Input | Output | Time |
-|---|---|---|
+| --- | --- | --- |
 | 512 bytes (config + helpers) | ~30 KB | ~50 ms |
 | 1 KB (ApiClient class + crypto) | ~32 KB | ~57 ms |
 | 3 KB (combined) | ~58 KB | ~65 ms |
