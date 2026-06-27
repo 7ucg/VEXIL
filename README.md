@@ -20,11 +20,17 @@ npm install "https://gitpkg.now.sh/7ucg/VEXIL/packages/vexil-obf?main"
 ```
 
 ```js
-const { obfuscateJs } = require('vexil-obf');
+const { obfuscateJs, PRESETS } = require('vexil-obf');
 
-const { code } = await obfuscateJs(source, {
+// quick start with a preset
+const { code } = await obfuscateJs(source, PRESETS.max);
+
+// or configure manually
+const { code: custom } = await obfuscateJs(source, {
   pass2: true,     // binary AST + AES-256-GCM VM
   format: 'cjs',  // 'cjs' | 'umd' | 'iife'
+  antiLLM: true,
+  agentDisrupt: true,
 });
 ```
 

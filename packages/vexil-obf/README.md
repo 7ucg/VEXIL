@@ -90,10 +90,10 @@ Not published to the npm registry. Install directly from the GitHub repo:
 npm install "https://gitpkg.now.sh/7ucg/VEXIL/packages/vexil-obf?main"
 ```
 
-For bundle-first workflow (Node.js projects bundled for browser):
+For the esbuild plugin or `bundleAndObfuscate`, add esbuild as a peer dependency:
 
 ```sh
-npm install "https://gitpkg.now.sh/7ucg/VEXIL/packages/vexil-obf?main" esbuild
+npm install esbuild
 ```
 
 ## API
