@@ -239,6 +239,9 @@ function pass1(source, opts) {
                     return;
                 }
                 const val = path.node.value;
+                // Skip non-ASCII strings — UTF-8 bytes ≠ code points, fromCharCode breaks them
+                if (/[^\x00-\x7F]/.test(val))
+                    return;
                 if (!strToIdx.has(val)) {
                     const bytes = Array.from(new TextEncoder().encode(val));
                     const enc = bytes.map((b, i) => b ^ encKey[i % 16]);
