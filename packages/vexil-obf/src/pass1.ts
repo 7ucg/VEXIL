@@ -76,25 +76,63 @@ function nameGen(): () => string {
 export function pass1(source: string, opts: Pass1Options): Pass1Result {
   // Pre-transform: lower ES6+ constructs (classes, destructuring, template literals)
   // so the binary AST encoder only needs to handle ES5-level nodes.
-  const lowered = babelCore.transformSync(source, {
-    plugins: [
-      babelPluginClasses,
-      babelPluginArrows,
-      pluginDestructureParams,
-      babelPluginDestructuring,
-      babelPluginTemplateLiterals,
-      babelPluginAsyncToGenerator,
-      babelPluginRegenerator,
-    ],
-    sourceType: 'unambiguous',
-    configFile: false,
-    babelrc: false,
-  });
+  const basePlugins = [
+    babelPluginClasses,
+    babelPluginArrows,
+    pluginDestructureParams,
+    babelPluginDestructuring,
+    babelPluginTemplateLiterals,
+    babelPluginAsyncToGenerator,
+    babelPluginRegenerator,
+  ];
+  let lowered: { code?: string | null } | null = null;
+  try {
+    lowered = babelCore.transformSync(source, {
+      plugins: basePlugins,
+      sourceType: 'unambiguous',
+      configFile: false,
+      babelrc: false,
+    });
+  } catch {
+    // Regenerator fails on some minified async patterns — retry without async plugins
+    try {
+      lowered = babelCore.transformSync(source, {
+        plugins: [babelPluginClasses, babelPluginArrows, pluginDestructureParams, babelPluginDestructuring, babelPluginTemplateLiterals],
+        sourceType: 'unambiguous',
+        configFile: false,
+        babelrc: false,
+      });
+    } catch {
+      lowered = null;
+    }
+  }
   const loweredSrc: string = lowered?.code ?? source;
 
   const ast = parser.parse(loweredSrc, {
     sourceType: 'module',
     plugins: ['typescript', 'classProperties', 'optionalChaining', 'nullishCoalescingOperator']
+  });
+
+  // Normalize AST nodes the WASM encoder can't handle:
+  // 1. Shorthand ObjectProperty {x} → {x: x}
+  // 2. ObjectMethod {fn(){}} → {fn: function(){}} (webpack module containers use this)
+  traverse(ast, {
+    ObjectProperty(path) {
+      if (path.node.shorthand && t.isIdentifier(path.node.key)) {
+        path.node.shorthand = false;
+        path.node.value = t.identifier((path.node.key as t.Identifier).name);
+      }
+    },
+    ObjectMethod(path) {
+      const fn = t.functionExpression(
+        null,
+        path.node.params,
+        path.node.body,
+        path.node.generator,
+        path.node.async,
+      );
+      path.replaceWith(t.objectProperty(path.node.key, fn, path.node.computed));
+    },
   });
 
   if (opts.poisonIdentifiers) {
@@ -264,7 +302,17 @@ export function pass1(source: string, opts: Pass1Options): Pass1Result {
   }
 
   const { code } = generate(ast, { compact: true, comments: false, sourceMaps: false });
-  const astJson = JSON.stringify(ast);
+  // Re-parse generated code for WASM JSON — avoids stale/shorthand Babel AST internals
+  let astJson: string;
+  try {
+    const freshAst = parser.parse(code, {
+      sourceType: 'unambiguous',
+      plugins: ['optionalChaining', 'nullishCoalescingOperator'],
+    });
+    astJson = JSON.stringify(freshAst);
+  } catch {
+    astJson = JSON.stringify(ast);
+  }
   return { code, astJson };
 }
 
