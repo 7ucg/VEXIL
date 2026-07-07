@@ -1,0 +1,42 @@
+{
+  "name": "vexil-obf",
+  "version": "1.0.0",
+  "description": "JS/Dart obfuscator — identifier renaming, control-flow flattening, string encryption, and VEXIL-VM bytecode protection",
+  "main": "packages/vexil-obf/dist/index.js",
+  "types": "packages/vexil-obf/dist/index.d.ts",
+  "exports": {
+    ".": "./packages/vexil-obf/dist/index.js",
+    "./rollup-plugin": "./packages/vexil-obf/dist/rollup-plugin.js",
+    "./vite-plugin": "./packages/vexil-obf/dist/vite-plugin.js",
+    "./webpack-plugin": "./packages/vexil-obf/dist/webpack-plugin.js",
+    "./bundle": "./packages/vexil-obf/dist/bundle.js",
+    "./esbuild-plugin": "./packages/vexil-obf/dist/esbuild-plugin.js"
+  },
+  "bin": {
+    "vexil-obf": "packages/vexil-obf/dist/cli.js"
+  },
+  "files": [
+    "packages/vexil-obf/dist/",
+    "packages/vexil-obf/wasm/"
+  ],
+  "dependencies": {
+    "@babel/core": "^8.0.1",
+    "@babel/generator": "^7.24.0",
+    "@babel/parser": "^7.24.0",
+    "@babel/plugin-transform-arrow-functions": "^8.0.1",
+    "@babel/plugin-transform-async-to-generator": "^8.0.1",
+    "@babel/plugin-transform-classes": "^8.0.1",
+    "@babel/plugin-transform-destructuring": "^8.0.1",
+    "@babel/plugin-transform-regenerator": "^8.0.2",
+    "@babel/plugin-transform-template-literals": "^8.0.1",
+    "@babel/traverse": "^7.24.0",
+    "@babel/types": "^7.24.0",
+    "commander": "^12.0.0"
+  },
+  "peerDependencies": {
+    "esbuild": ">=0.20.0"
+  },
+  "peerDependenciesMeta": {
+    "esbuild": { "optional": true }
+  }
+}
