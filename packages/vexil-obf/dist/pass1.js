@@ -144,6 +144,7 @@ function pass1(source, opts) {
     // Normalize AST nodes the WASM encoder can't handle:
     // 1. Shorthand ObjectProperty {x} → {x: x}
     // 2. ObjectMethod {fn(){}} → {fn: function(){}} (webpack module containers use this)
+    // 3. RegExp literals /pat/flags → new RegExp('pat', 'flags') so WASM doesn't lose them
     (0, traverse_1.default)(ast, {
         ObjectProperty(path) {
             if (path.node.shorthand && t.isIdentifier(path.node.key)) {
@@ -154,6 +155,14 @@ function pass1(source, opts) {
         ObjectMethod(path) {
             const fn = t.functionExpression(null, path.node.params, path.node.body, path.node.generator, path.node.async);
             path.replaceWith(t.objectProperty(path.node.key, fn, path.node.computed));
+        },
+        RegExpLiteral(path) {
+            // Replace /pat/flags with new RegExp('pat', 'flags') so the WASM AST
+            // encoder doesn't silently drop the node and produce undefined at runtime.
+            path.replaceWith(t.newExpression(t.identifier('RegExp'), [
+                t.stringLiteral(path.node.pattern),
+                t.stringLiteral(path.node.flags),
+            ]));
         },
     });
     if (opts.poisonIdentifiers) {
